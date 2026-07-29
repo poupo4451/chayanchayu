@@ -30,7 +30,7 @@ function postToRenderService(taskId) {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(data),
         },
-        timeout: 10000,
+        timeout: 30000,
       },
       (res) => {
         let body = '';

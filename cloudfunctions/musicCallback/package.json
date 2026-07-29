@@ -1,0 +1,9 @@
+{
+  "name": "musicCallback",
+  "version": "1.0.0",
+  "description": "接收Suno音乐生成回调，更新任务状态并触发视频渲染",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

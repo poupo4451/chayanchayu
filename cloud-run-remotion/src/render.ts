@@ -100,16 +100,120 @@ async function uploadVideo(filePath: string, taskId: string): Promise<string> {
   return (result as { fileID: string }).fileID;
 }
 
+async function setStage(taskId: string, stage: string, progress?: number): Promise<void> {
+  try {
+    const data: { renderStage: string; updatedAt: number; progress?: number } = {
+      renderStage: stage,
+      updatedAt: Date.now(),
+    };
+    if (typeof progress === 'number') data.progress = progress;
+    await db.collection('tasks').doc(taskId).update(data);
+  } catch {
+    // 阶段标记失败不影响主流程
+  }
+}
+
+export async function debugRenderSteps(taskId: string): Promise<Record<string, unknown>> {
+  const steps: Record<string, unknown> = {};
+  const mark = (k: string, v: unknown) => {
+    steps[k] = v;
+  };
+  const errOf = (e: unknown) => (e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e));
+
+  // 1. 读任务
+  try {
+    const t0 = Date.now();
+    const taskRes = await db.collection('tasks').doc(taskId).get();
+    const raw = taskRes.data;
+    const task = (Array.isArray(raw) ? raw[0] : raw) as TaskData | undefined;
+    mark('readTask', {
+      ok: true,
+      ms: Date.now() - t0,
+      hasTask: !!task,
+      bubbleCount: task?.screenshots?.length ?? 0,
+    });
+    if (!task) return steps;
+  } catch (e) {
+    mark('readTask', { ok: false, error: errOf(e) });
+    return steps;
+  }
+
+  // 2. 写库（验证 setStage 是否真的能写）
+  try {
+    const t0 = Date.now();
+    await db.collection('tasks').doc(taskId).update({
+      renderStage: 'debug_probe',
+      updatedAt: Date.now(),
+    });
+    mark('writeStage', { ok: true, ms: Date.now() - t0 });
+  } catch (e) {
+    mark('writeStage', { ok: false, error: errOf(e) });
+    return steps;
+  }
+
+  // 3. bundle
+  let serveUrl = '';
+  try {
+    const t0 = Date.now();
+    serveUrl = await getBundleLocation();
+    mark('bundle', { ok: true, ms: Date.now() - t0, serveUrl });
+  } catch (e) {
+    mark('bundle', { ok: false, error: errOf(e) });
+    return steps;
+  }
+
+  // 4. selectComposition（会真正启动 Chromium）
+  try {
+    const t0 = Date.now();
+    const composition = await selectComposition({
+      serveUrl,
+      id: 'chat-mv',
+      inputProps: { bubbles: [], audioPath: '', audioDuration: 30 },
+      ...(BROWSER_EXECUTABLE ? { browserExecutable: BROWSER_EXECUTABLE } : {}),
+    });
+    mark('selectComposition', {
+      ok: true,
+      ms: Date.now() - t0,
+      durationInFrames: composition.durationInFrames,
+      browserExecutable: BROWSER_EXECUTABLE || '(default)',
+    });
+  } catch (e) {
+    mark('selectComposition', {
+      ok: false,
+      error: errOf(e),
+      browserExecutable: BROWSER_EXECUTABLE || '(default)',
+    });
+    return steps;
+  }
+
+  return steps;
+}
+
+export async function getTempVideoUrl(fileId: string): Promise<string> {
+  const result = await app.getTempFileURL({ fileList: [fileId] });
+  const fileList = (result as { fileList: Array<{ fileID: string; tempFileURL: string }> }).fileList;
+  return fileList[0]?.tempFileURL ?? '';
+}
+
+export async function getTaskVideoUrl(taskId: string): Promise<{ fileId: string; url: string } | null> {
+  const taskRes = await db.collection('tasks').doc(taskId).get();
+  const raw = taskRes.data;
+  const task = (Array.isArray(raw) ? raw[0] : raw) as { resultVideoUrl?: string } | undefined;
+  const fileId = task?.resultVideoUrl;
+  if (!fileId) return null;
+  const url = await getTempVideoUrl(fileId);
+  return { fileId, url };
+}
+
 export async function renderTask(taskId: string): Promise<void> {
   console.log(`starting render for task ${taskId}`);
+  await setStage(taskId, 'starting', 80);
 
   try {
-    await db.collection('tasks').doc(taskId).update({
-      data: { progress: 80, updatedAt: Date.now() },
-    });
-
     const taskRes = await db.collection('tasks').doc(taskId).get();
-    const task = taskRes.data as TaskData;
+    // node-sdk 的 doc().get() 返回 data 为数组，需取第一项
+    const raw = taskRes.data;
+    const task = (Array.isArray(raw) ? raw[0] : raw) as TaskData | undefined;
 
     if (!task) throw new Error('task not found');
 
@@ -122,10 +226,15 @@ export async function renderTask(taskId: string): Promise<void> {
     }
 
     await resolveStickerUrls(bubbles);
+    await setStage(taskId, 'stickers_resolved');
 
     const audioPath = audioUrl ? await downloadAudio(audioUrl) : null;
+    await setStage(taskId, 'audio_ready');
 
+    await setStage(taskId, 'bundling');
     const serveUrl = await getBundleLocation();
+    await setStage(taskId, 'bundled');
+    console.log('bundle location:', serveUrl);
 
     const inputProps = {
       bubbles,
@@ -137,53 +246,66 @@ export async function renderTask(taskId: string): Promise<void> {
       serveUrl,
       id: 'chat-mv',
       inputProps,
+      ...(BROWSER_EXECUTABLE ? { browserExecutable: BROWSER_EXECUTABLE } : {}),
     });
 
-    console.log(`rendering ${composition.durationInFrames} frames at 30fps...`);
+    console.log(
+      `composing done: ${composition.durationInFrames} frames at 30fps, starting renderMedia...`,
+    );
+    await setStage(taskId, 'rendering_frames');
+
+    let lastReportedPct = -1;
     await renderMedia({
       composition,
       serveUrl,
       codec: 'h264',
       outputLocation: OUTPUT_PATH,
       ...(BROWSER_EXECUTABLE ? { browserExecutable: BROWSER_EXECUTABLE } : {}),
+      onProgress: ({ progress }: { progress: number }) => {
+        const pct = Math.floor(progress * 100);
+        if (pct > lastReportedPct && pct % 5 === 0) {
+          lastReportedPct = pct;
+          console.log(`render progress: ${pct}%`);
+          // 渲染阶段进度映射到 80-99（最终 100 在上传后）
+          void setStage(taskId, `rendering_${pct}`, 80 + Math.floor(pct * 0.19));
+        }
+      },
     });
+
+    await setStage(taskId, 'uploading');
 
     const fileId = await uploadVideo(OUTPUT_PATH, taskId);
     console.log(`uploaded to ${fileId}`);
 
     await db.collection('tasks').doc(taskId).update({
-      data: {
-        resultVideoUrl: fileId,
-        status: 'completed',
-        progress: 100,
-        updatedAt: Date.now(),
-      },
+      resultVideoUrl: fileId,
+      status: 'completed',
+      progress: 100,
+      renderStage: 'completed',
+      updatedAt: Date.now(),
     });
 
     await db.collection('works').add({
-      data: {
-        taskId,
-        userId: task.userId,
-        title: task.topic,
-        videoUrl: fileId,
-        duration: audioDuration,
-        style: task.style,
-        createdAt: Date.now(),
-      },
+      taskId,
+      userId: task.userId,
+      title: task.topic,
+      videoUrl: fileId,
+      duration: audioDuration,
+      style: task.style,
+      createdAt: Date.now(),
     });
 
     console.log(`render complete for task ${taskId}`);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
     console.error(`render failed for task ${taskId}:`, msg);
     try {
       await db.collection('tasks').doc(taskId).update({
-        data: {
-          status: 'failed',
-          errorStage: 'rendering_video',
-          errorMsg: msg,
-          updatedAt: Date.now(),
-        },
+        status: 'failed',
+        errorStage: 'rendering_video',
+        errorMsg: msg,
+        renderStage: 'failed',
+        updatedAt: Date.now(),
       });
     } catch (updateErr) {
       console.error('failed to update task error status:', updateErr);
