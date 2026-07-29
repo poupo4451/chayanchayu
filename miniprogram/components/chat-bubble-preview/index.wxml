@@ -1,0 +1,59 @@
+<view wx:if="{{line.type === 'time'}}" class="time-divider">
+  <text>{{line.text}}</text>
+</view>
+
+<view
+  wx:elif="{{line.type === 'image'}}"
+  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
+  bindtap="onTap"
+>
+  <view class="avatar avatar-{{line.role || 'left'}}">{{line.name ? line.name[0] : '茶'}}</view>
+  <image class="bubble-sticker" src="{{line.params.imageUrl}}" mode="aspectFit" />
+</view>
+
+<view
+  wx:elif="{{line.type === 'redpacket'}}"
+  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
+  bindtap="onTap"
+>
+  <view class="avatar avatar-{{line.role || 'left'}}">{{line.name ? line.name[0] : '茶'}}</view>
+  <view class="bubble bubble-redpacket">
+    <view class="redpacket-top">
+      <view class="redpacket-icon">🧧</view>
+      <text class="redpacket-text">{{line.text || '恭喜发财'}}</text>
+    </view>
+    <view class="redpacket-divider"></view>
+    <text class="redpacket-bottom">微信红包</text>
+  </view>
+</view>
+
+<view
+  wx:elif="{{line.type === 'transfer'}}"
+  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
+  bindtap="onTap"
+>
+  <view class="avatar avatar-{{line.role || 'left'}}">{{line.name ? line.name[0] : '茶'}}</view>
+  <view class="bubble bubble-transfer">
+    <view class="transfer-top">
+      <view class="transfer-icon">￥</view>
+      <view class="transfer-info">
+        <text class="transfer-amount">￥{{line.params.amount}}</text>
+        <text class="transfer-remark">{{line.text || '转账'}}</text>
+      </view>
+    </view>
+    <view class="transfer-divider"></view>
+    <text class="transfer-bottom">微信转账</text>
+  </view>
+</view>
+
+<view
+  wx:else
+  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
+  bindtap="onTap"
+>
+  <view class="avatar avatar-{{line.role || 'left'}}">{{line.name ? line.name[0] : '茶'}}</view>
+  <view class="bubble bubble-{{line.role || 'left'}}">
+    <text class="bubble-name">{{line.name}}</text>
+    <text class="bubble-text">{{line.text}}</text>
+  </view>
+</view>

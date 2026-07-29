@@ -1,0 +1,9 @@
+{
+  "name": "generateMusic",
+  "version": "1.0.0",
+  "description": "封装MusicProvider提交/轮询/取回逻辑",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

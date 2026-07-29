@@ -1,0 +1,9 @@
+{
+  "name": "confirmDialogue",
+  "version": "1.0.0",
+  "description": "确认对话内容并触发后续生成链路",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

@@ -1,0 +1,43 @@
+<view class="page">
+  <view class="card">
+    <text class="field-label">主题 / 人设</text>
+    <textarea
+      class="topic-input"
+      placeholder="例如：绿茶跟前男友对话、搞笑闺蜜互怼…"
+      placeholder-class="placeholder"
+      value="{{topic}}"
+      bindinput="onTopicInput"
+      maxlength="100"
+    />
+  </view>
+
+  <view class="card">
+    <text class="field-label">对话风格</text>
+    <view class="chip-row">
+      <view
+        class="chip {{selectedTone === item ? 'chip-active' : ''}}"
+        wx:for="{{dialogueTones}}"
+        wx:key="*this"
+        data-value="{{item}}"
+        bindtap="selectTone"
+      >{{item}}</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <text class="field-label">音乐风格</text>
+    <view class="chip-row">
+      <view
+        class="chip {{selectedGenre === item ? 'chip-active' : ''}}"
+        wx:for="{{musicGenres}}"
+        wx:key="*this"
+        data-value="{{item}}"
+        bindtap="selectGenre"
+      >{{item}}</view>
+    </view>
+  </view>
+
+  <view class="btn-gradient" bindtap="onSubmit">
+    <text>{{submitting ? '生成中…' : '生成对话'}}</text>
+  </view>
+</view>

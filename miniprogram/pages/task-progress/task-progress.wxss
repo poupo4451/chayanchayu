@@ -1,0 +1,63 @@
+.progress-page {
+  justify-content: center;
+  align-items: center;
+}
+
+.progress-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60rpx 40rpx;
+  margin-bottom: 40rpx;
+}
+
+.stage-emoji {
+  font-size: 80rpx;
+  margin-bottom: 20rpx;
+}
+
+.stage-label {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 40rpx;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 16rpx;
+  background: rgba(255,255,255,0.08);
+  border-radius: 8rpx;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #FF2D78 0%, #7C3AED 100%);
+  border-radius: 8rpx;
+  transition: width 0.3s;
+}
+
+.progress-num {
+  margin-top: 16rpx;
+  font-size: 14px;
+  color: var(--text-sub);
+}
+
+.error-msg {
+  margin-top: 20rpx;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.btn-outline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88rpx;
+  padding: 0 40rpx;
+  border-radius: 44rpx;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  font-size: 14px;
+}

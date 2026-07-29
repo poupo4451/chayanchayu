@@ -1,0 +1,10 @@
+{
+  "name": "generateDialogue",
+  "version": "1.0.0",
+  "description": "调用LLMProvider生成对话文案",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest",
+    "@cloudbase/node-sdk": "^3.16.0"
+  }
+}

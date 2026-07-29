@@ -1,0 +1,29 @@
+{
+  "pages": [
+    "pages/home/home",
+    "pages/create/create",
+    "pages/dialogue-preview/dialogue-preview",
+    "pages/task-progress/task-progress",
+    "pages/my-works/my-works"
+  ],
+  "window": {
+    "backgroundTextStyle": "dark",
+    "navigationBarBackgroundColor": "#1A1625",
+    "navigationBarTitleText": "茶言茶曲",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#0E0B16"
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#A5A0B8",
+    "selectedColor": "#FF2D78",
+    "backgroundColor": "#1A1625",
+    "list": [
+      { "pagePath": "pages/home/home", "text": "首页" },
+      { "pagePath": "pages/my-works/my-works", "text": "我的作品" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

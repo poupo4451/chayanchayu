@@ -1,0 +1,43 @@
+.field-label {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 20rpx;
+}
+
+.topic-input {
+  width: 100%;
+  min-height: 160rpx;
+  background: rgba(255,255,255,0.05);
+  border-radius: 16rpx;
+  padding: 20rpx;
+  font-size: 14px;
+  color: #fff;
+  box-sizing: border-box;
+}
+
+.placeholder {
+  color: var(--text-sub);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: 14rpx 32rpx;
+  border-radius: 32rpx;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-sub);
+  font-size: 14px;
+  margin-right: 16rpx;
+  margin-bottom: 16rpx;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.chip-active {
+  background: linear-gradient(135deg, #FF2D78 0%, #7C3AED 100%);
+  color: #fff;
+  border-color: transparent;
+}

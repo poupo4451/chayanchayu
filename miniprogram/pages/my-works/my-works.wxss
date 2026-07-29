@@ -1,0 +1,42 @@
+.works-page {
+  padding-top: 80rpx;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 200rpx;
+}
+
+.work-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.work-cover {
+  width: 160rpx;
+  height: 100rpx;
+  border-radius: 16rpx;
+  background: linear-gradient(135deg, #FF2D78 0%, #7C3AED 100%);
+  margin-right: 20rpx;
+  flex-shrink: 0;
+}
+
+.work-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.work-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8rpx;
+}
+
+.work-duration {
+  font-size: 12px;
+  color: var(--text-sub);
+}

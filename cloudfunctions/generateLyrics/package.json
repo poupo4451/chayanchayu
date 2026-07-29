@@ -1,0 +1,10 @@
+{
+  "name": "generateLyrics",
+  "version": "1.0.0",
+  "description": "将对话内容改编为指定风格歌词",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest",
+    "@cloudbase/node-sdk": "^3.16.0"
+  }
+}

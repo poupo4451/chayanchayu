@@ -1,0 +1,25 @@
+<view class="page preview-page">
+  <view class="bubble-list">
+    <block wx:if="{{loading}}">
+      <text class="text-sub">加载中…</text>
+    </block>
+    <block wx:else>
+      <chat-bubble-preview
+        wx:for="{{dialogue}}"
+        wx:key="index"
+        line="{{item}}"
+        data-index="{{index}}"
+        bindtap="onEditLine"
+      />
+    </block>
+  </view>
+
+  <view class="action-row">
+    <view class="btn-outline" bindtap="onRegenerate">
+      <text>重新生成</text>
+    </view>
+    <view class="btn-gradient flex-1" bindtap="onConfirm">
+      <text>确认生成MV</text>
+    </view>
+  </view>
+</view>

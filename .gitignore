@@ -1,0 +1,27 @@
+# 依赖
+node_modules/
+
+# macOS
+.DS_Store
+
+# 微信开发者工具私有配置（本地编译选项，不共享）
+project.private.config.json
+
+# CodeBuddy / IDE 本地运行时数据与下发的规则、skills（非项目源码）
+.codebuddy/
+.agents/
+codebuddy-plugin/
+.iflow/
+.lingma/
+.roo/
+.rules/
+.workbuddy/
+.cloudbaserc.json
+.mcp.json
+CODEBUDDY.md
+IFLOW.md
+rules/
+
+# 临时文件
+*.log
+temp-stickers/

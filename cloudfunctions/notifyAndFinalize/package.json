@@ -1,0 +1,9 @@
+{
+  "name": "notifyAndFinalize",
+  "version": "1.0.0",
+  "description": "渲染完成后更新works集合、发送订阅消息通知",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

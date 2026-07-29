@@ -1,0 +1,19 @@
+<view class="page progress-page">
+  <view class="card progress-card">
+    <text class="stage-emoji">{{failed ? '😵' : '🎧'}}</text>
+    <text class="stage-label">{{stageLabel}}</text>
+
+    <view class="progress-bar">
+      <view class="progress-fill" style="width: {{progress}}%"></view>
+    </view>
+    <text class="progress-num">{{progress}}%</text>
+
+    <block wx:if="{{failed}}">
+      <text class="error-msg">{{errorMsg || '生成失败，请稍后重试'}}</text>
+    </block>
+  </view>
+
+  <view class="btn-outline" bindtap="onExit">
+    <text>先去逛逛，稍后再看</text>
+  </view>
+</view>

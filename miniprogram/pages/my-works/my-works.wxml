@@ -1,0 +1,21 @@
+<view class="page works-page">
+  <text class="page-title">我的作品</text>
+
+  <block wx:if="{{loading}}">
+    <text class="text-sub">加载中…</text>
+  </block>
+  <block wx:elif="{{works.length === 0}}">
+    <view class="empty-state">
+      <text class="text-sub">还没有作品，快去创作一个吧～</text>
+    </view>
+  </block>
+  <block wx:else>
+    <view class="work-card card" wx:for="{{works}}" wx:key="id" data-id="{{item.id}}" bindtap="onOpenWork">
+      <view class="work-cover"></view>
+      <view class="work-info">
+        <text class="work-title">{{item.title}}</text>
+        <text class="work-duration">{{item.duration}}</text>
+      </view>
+    </view>
+  </block>
+</view>

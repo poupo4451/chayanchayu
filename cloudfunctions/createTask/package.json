@@ -1,0 +1,9 @@
+{
+  "name": "createTask",
+  "version": "1.0.0",
+  "description": "创建生成任务，写入tasks集合并触发对话生成",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}
