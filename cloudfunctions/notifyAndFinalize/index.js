@@ -1,16 +1,57 @@
 /**
  * notifyAndFinalize 云函数（Event Function）
- * 职责：渲染完成后更新works集合、发送订阅消息通知
- * 骨架阶段：暂未接入真实 Remotion 渲染（云托管服务待第4步接入），
- * 先用占位视频地址模拟"rendering_video → completed"流转，验证状态机与作品落库
+ * 职责：音乐产出后，触发云托管 Remotion 服务渲染 MV 视频
+ * 通过 HTTP POST 调用云托管服务的 /render 端点（云托管异步处理并更新 task 状态）
+ * 不再直接设置 completed——渲染由云托管服务异步完成，渲染完后云托管服务自行更新 task
  */
 const cloud = require('wx-server-sdk');
+const https = require('https');
+const { URL } = require('url');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 const db = cloud.database();
 
-const PLACEHOLDER_VIDEO_URL = 'https://cloud-tips-1300000000.cos.ap-shanghai.myqcloud.com/placeholder-mv.mp4';
+// 云托管 Remotion 服务的公网域名（从云托管控制台获取）
+const REMOTION_SERVICE_URL =
+  process.env.REMOTION_SERVICE_URL ||
+  'https://chat-mv-remotion-288614-10-1459907343.sh.run.tcloudbase.com';
+
+function postToRenderService(taskId) {
+  return new Promise((resolve, reject) => {
+    const url = new URL('/render', REMOTION_SERVICE_URL);
+    const data = JSON.stringify({ taskId });
+    const req = https.request(
+      {
+        hostname: url.hostname,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(data),
+        },
+        timeout: 10000,
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({ status: res.statusCode, body });
+          } else {
+            reject(new Error(`HTTP ${res.statusCode}: ${body}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('request timeout')));
+    req.write(data);
+    req.end();
+  });
+}
 
 exports.main = async (event) => {
   const { taskId } = event;
@@ -19,49 +60,24 @@ exports.main = async (event) => {
   }
 
   const tasksCol = db.collection('tasks');
-  const worksCol = db.collection('works');
 
   try {
-    const taskRes = await tasksCol.doc(taskId).get();
-    const task = taskRes.data;
-
-    // TODO: 第4步接入云托管 Remotion 服务后，这里改为真实渲染产物 URL
-    const resultVideoUrl = task.resultVideoUrl || PLACEHOLDER_VIDEO_URL;
-
-    await tasksCol.doc(taskId).update({
-      data: {
-        resultVideoUrl,
-        status: 'completed',
-        progress: 100,
-        updatedAt: Date.now(),
-      },
-    });
-
-    await worksCol.add({
-      data: {
-        taskId,
-        userId: task.userId,
-        title: task.topic,
-        videoUrl: resultVideoUrl,
-        duration: task.audioDuration || 30,
-        style: task.style,
-        createdAt: Date.now(),
-      },
-    });
-
-    // TODO: 接入订阅消息通知（需要 tmplId，用户提供后再补充）
-
-    return { success: true, data: { taskId, resultVideoUrl } };
+    const result = await postToRenderService(taskId);
+    // 状态保持 rendering_video，等云托管渲染完后更新为 completed
+    return {
+      success: true,
+      data: { taskId, message: 'rendering triggered', service: result.body },
+    };
   } catch (e) {
     console.error('notifyAndFinalize error', e);
     await tasksCol.doc(taskId).update({
       data: {
         status: 'failed',
         errorStage: 'rendering_video',
-        errorMsg: e.message || '视频合成失败',
+        errorMsg: e.message || '触发视频渲染失败',
         updatedAt: Date.now(),
       },
     });
-    return { success: false, message: e.message || '视频合成失败' };
+    return { success: false, message: e.message || '触发视频渲染失败' };
   }
 };

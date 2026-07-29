@@ -1,7 +1,7 @@
 /**
  * createTask 云函数（Event Function）
  * 职责：创建任务记录，写入 tasks 集合，触发后续 generateDialogue 云函数
- * 骨架阶段：状态机走通即可，AI 逻辑在 generateDialogue 中用 Mock 实现
+ * 创建任务记录后异步触发 generateDialogue（真实 AI 对话生成）
  */
 const cloud = require('wx-server-sdk');
 
