@@ -16,65 +16,62 @@ interface ChatMVProps {
 }
 
 const FPS = 30;
-const TOP_BAR_HEIGHT = 130;
-const BOTTOM_PADDING = 100;
-const BUBBLE_GAP = 18;
-const BUBBLE_ROW_HEIGHT = 130;
+const TOP_BAR_HEIGHT = 130; // 顶部导航栏高度
+const BOTTOM_INPUT_HEIGHT = 130; // 底部输入栏高度
+const BUBBLE_GAP = 43; // 气泡行间距（与 ChatBubble 的 WX 规范一致）
+const BUBBLE_ROW_HEIGHT = 160; // 单行预估高度（含昵称 + 气泡）
 
 export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // 过滤掉 time 分隔条单独处理（也参与出现序列但不占滚动高度）
-  const allBubbles = bubbles;
-  const visibleBubbles = allBubbles.filter((b) => b.type !== 'time');
+  // 解析每个气泡的 startFrame：
+  // - 非 time 气泡用自身 startFrame（缺省用前一个已对齐的时间）
+  // - time 分隔条借用「下一个非 time 气泡」的时间，让它随对应对话一起出现
+  const resolved = bubbles.map((b) => ({ ...b }));
+  let lastNonTimeFrame = 0;
+  for (const b of resolved) {
+    if (b.type === 'time') continue;
+    if (b.startFrame == null) b.startFrame = lastNonTimeFrame;
+    else lastNonTimeFrame = b.startFrame;
+  }
+  for (let i = 0; i < resolved.length; i += 1) {
+    if (resolved[i].type !== 'time') continue;
+    let sf = i > 0 ? resolved[i - 1].startFrame ?? 0 : 0;
+    for (let j = i + 1; j < resolved.length; j += 1) {
+      if (resolved[j].type !== 'time') {
+        sf = resolved[j].startFrame ?? sf;
+        break;
+      }
+    }
+    resolved[i].startFrame = sf;
+  }
 
+  const visibleBubbles = resolved.filter((b) => b.type !== 'time');
   const total = visibleBubbles.length;
-  const durationInFrames = total > 0 ? Math.max(total * 3, 1) : 1; // 占位，实际由 selectComposition 决定
-  const framesPerBubble = Math.floor(durationInFrames / Math.max(total, 1));
 
-  // 当前应显示的气泡数量
-  const currentCount = Math.min(
-    Math.floor(frame / framesPerBubble) + 1,
-    total
-  );
+  // 当前应显示的气泡数量：startFrame 已到的
+  const currentCount = visibleBubbles.filter(
+    (b) => (b.startFrame ?? 0) <= frame,
+  ).length;
 
   // 滚动：当气泡数超过可视区域时，整体向上推
-  const visibleAreaHeight = 1920 - TOP_BAR_HEIGHT - BOTTOM_PADDING;
+  const visibleAreaHeight = 1920 - TOP_BAR_HEIGHT - BOTTOM_INPUT_HEIGHT;
   const maxVisible = Math.floor(visibleAreaHeight / BUBBLE_ROW_HEIGHT);
   const scrollY = Math.max(0, (currentCount - maxVisible) * BUBBLE_ROW_HEIGHT);
 
-  // 需要渲染的气泡（含已出现的 + time 分隔条）
-  const shownBubbles: BubbleData[] = [];
-  let visibleIdx = 0;
-  for (const b of allBubbles) {
-    if (b.type === 'time') {
-      // time 分隔条跟随前一个气泡出现
-      if (visibleIdx > 0 && visibleIdx <= currentCount) {
-        shownBubbles.push(b);
-      }
-      continue;
-    }
-    if (visibleIdx < currentCount) {
-      shownBubbles.push(b);
-    }
-    visibleIdx += 1;
-  }
+  // 需要渲染的气泡（含已出现的 + time 分隔条），保持对话原始顺序
+  const shownBubbles = resolved.filter((b) => (b.startFrame ?? 0) <= frame);
 
   return (
-    <AbsoluteFill style={{ backgroundColor: '#0f0f1e' }}>
-      {/* 暗色渐变背景 */}
-      <AbsoluteFill
-        style={{
-          background:
-            'linear-gradient(160deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%)',
-        }}
-      />
+    <AbsoluteFill style={{ backgroundColor: '#EDEDED' }}>
+      {/* 微信聊天背景：浅灰底 */}
+      <AbsoluteFill style={{ backgroundColor: '#EDEDED' }} />
 
       {/* 背景音频 */}
       {audioPath ? <Audio src={audioPath} /> : null}
 
-      {/* 顶部状态栏 */}
+      {/* 顶部导航栏（微信风格：白底 + 返回 + 标题 + 更多） */}
       <div
         style={{
           position: 'absolute',
@@ -84,13 +81,22 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath })
           height: TOP_BAR_HEIGHT,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          justifyContent: 'space-between',
+          padding: '0 36px',
+          background: '#EDEDED',
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
         }}
       >
-        <span style={{ fontSize: 28, color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>
-          茶言茶曲
-        </span>
+        {/* 左：返回箭头 */}
+        <div style={{ fontSize: 44, color: '#1A1A1A', fontWeight: 300, lineHeight: 1 }}>
+          ‹
+        </div>
+        {/* 中：标题 */}
+        <span style={{ fontSize: 42, color: '#1A1A1A', fontWeight: 600 }}>茶言茶曲</span>
+        {/* 右：更多 */}
+        <div style={{ fontSize: 44, color: '#1A1A1A', fontWeight: 700, lineHeight: 1, letterSpacing: 4 }}>
+          ···
+        </div>
       </div>
 
       {/* 聊天气泡区域 */}
@@ -100,7 +106,7 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath })
           top: TOP_BAR_HEIGHT,
           left: 0,
           right: 0,
-          bottom: BOTTOM_PADDING,
+          bottom: BOTTOM_INPUT_HEIGHT,
           overflow: 'hidden',
         }}
       >
@@ -114,13 +120,9 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath })
           }}
         >
           {shownBubbles.map((bubble, i) => {
-            // 计算这个气泡出现时的局部帧
-            // time 分隔条使用前一个可见气泡的帧
-            const bubbleVisibleIdx = bubble.type === 'time' ? visibleIdx - 1 : i;
-            const startFrame = bubbleVisibleIdx * framesPerBubble;
+            const startFrame = bubble.startFrame ?? 0;
             const localFrame = frame - startFrame;
 
-            // spring 出现动画
             const appearProgress = spring({
               frame: Math.max(localFrame, 0),
               fps,
@@ -145,17 +147,45 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath })
         </div>
       </div>
 
-      {/* 底部渐变淡出 */}
+      {/* 底部输入栏（微信风格：语音 + 输入框 + 表情 + 加号） */}
       <div
         style={{
           position: 'absolute',
           bottom: 0,
           left: 0,
           right: 0,
-          height: BOTTOM_PADDING,
-          background: 'linear-gradient(to bottom, transparent, #0f0f1e)',
+          height: BOTTOM_INPUT_HEIGHT,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 24,
+          padding: '0 36px',
+          background: '#F7F7F7',
+          borderTop: '1px solid rgba(0,0,0,0.08)',
         }}
-      />
+      >
+        {/* 语音按钮 */}
+        <div style={{ fontSize: 48, color: '#1A1A1A', lineHeight: 1 }}>🔊</div>
+        {/* 输入框 */}
+        <div
+          style={{
+            flex: 1,
+            height: 84,
+            borderRadius: 14,
+            background: '#FFFFFF',
+            display: 'flex',
+            alignItems: 'center',
+            paddingLeft: 28,
+            color: '#999999',
+            fontSize: 36,
+          }}
+        >
+          按住说话
+        </div>
+        {/* 表情 */}
+        <div style={{ fontSize: 48, color: '#1A1A1A', lineHeight: 1 }}>😊</div>
+        {/* 加号 */}
+        <div style={{ fontSize: 48, color: '#1A1A1A', lineHeight: 1 }}>⊕</div>
+      </div>
     </AbsoluteFill>
   );
 };

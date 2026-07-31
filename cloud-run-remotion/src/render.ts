@@ -28,10 +28,26 @@ const AUDIO_PATH = '/tmp/chat-mv-audio.mp3';
 
 let cachedBundleLocation: string | null = null;
 
+interface LyricLine {
+  lineIndex: number;
+  text: string;
+  startS: number;
+  endS: number;
+}
+interface LineMapEntry {
+  lineIndex: number;
+  dialogueIndex: number;
+}
+
 interface TaskData {
   screenshots: BubbleData[];
   audioUrl: string;
+  audioId: string;
   audioDuration: number;
+  musicProviderTaskId: string;
+  lyrics: string;
+  lyricsLineMap: LineMapEntry[];
+  lyricsTimeline: LyricLine[];
   userId: string;
   topic: string;
   style: { dialogueTone: string; musicGenre: string };
@@ -111,6 +127,65 @@ async function setStage(taskId: string, stage: string, progress?: number): Promi
   } catch {
     // 阶段标记失败不影响主流程
   }
+}
+
+const RENDER_FPS = 30;
+
+/**
+ * 用歌词行级时间戳(lyricsTimeline) + 歌词行→对话映射(lyricsLineMap)
+ * 计算每个对话气泡应该出现的帧号。
+ *
+ * 映射链：dialogueIndex → lineMap 里所有该对话的歌词行 → 取最早 startS → ×fps 得 startFrame
+ *
+ * 降级：
+ * - 无 timeline/lineMap 或映射为空 → 全部均匀分配
+ * - 部分气泡无映射 → 用前一个已对齐气泡的时间
+ */
+function computeBubbleStartFrames(
+  bubbles: BubbleData[],
+  lineMap: LineMapEntry[] | undefined,
+  timeline: LyricLine[] | undefined,
+  totalFrames: number,
+): BubbleData[] {
+  const hasTimeline = Array.isArray(timeline) && timeline.length > 0;
+  const hasMap = Array.isArray(lineMap) && lineMap.length > 0;
+
+  // 完全没有对齐数据：均匀分配（含 time 分隔条一起均分，保持相对顺序）
+  if (!hasTimeline || !hasMap) {
+    const n = bubbles.length;
+    const per = Math.floor(totalFrames / Math.max(n, 1));
+    return bubbles.map((b, i) => ({ ...b, startFrame: Math.min(i * per, totalFrames - 1) }));
+  }
+
+  // 歌词行号 → 开始秒
+  const lineToStart = new Map<number, number>();
+  for (const t of timeline as LyricLine[]) {
+    if (!lineToStart.has(t.lineIndex)) lineToStart.set(t.lineIndex, t.startS);
+  }
+
+  // 对话idx → 该对话所有歌词行里最早的开始秒
+  const dialogueStart = new Map<number, number>();
+  for (const m of lineMap as LineMapEntry[]) {
+    if (m.dialogueIndex < 0) continue;
+    const s = lineToStart.get(m.lineIndex);
+    if (s == null) continue;
+    const cur = dialogueStart.get(m.dialogueIndex);
+    if (cur == null || s < cur) dialogueStart.set(m.dialogueIndex, s);
+  }
+
+  // 给每个气泡赋 startFrame；未映射到的用前一个的时间
+  let lastFrame = 0;
+  return bubbles.map((b) => {
+    const s = dialogueStart.get(b.index);
+    let frame: number;
+    if (s != null) {
+      frame = Math.max(0, Math.min(Math.round(s * RENDER_FPS), totalFrames - 1));
+      lastFrame = frame;
+    } else {
+      frame = lastFrame;
+    }
+    return { ...b, startFrame: frame };
+  });
 }
 
 export async function debugRenderSteps(taskId: string): Promise<Record<string, unknown>> {
@@ -228,7 +303,27 @@ export async function renderTask(taskId: string): Promise<void> {
     await resolveStickerUrls(bubbles);
     await setStage(taskId, 'stickers_resolved');
 
-    const audioPath = audioUrl ? await downloadAudio(audioUrl) : null;
+    // 用歌词时间戳对齐气泡出现时间（无时间戳则降级均匀分配）
+    const totalFrames = Math.ceil(audioDuration * RENDER_FPS);
+    const bubblesTimed = computeBubbleStartFrames(
+      bubbles,
+      task.lyricsLineMap,
+      task.lyricsTimeline,
+      totalFrames,
+    );
+
+    // Remotion 的 <Audio> 组件支持直接使用可访问的 http(s) URL，
+    // 渲染器会下载并混入音轨。之前把音频下载到容器 /tmp 后传入本地绝对路径，
+    // 会被 Remotion 的静态服务当成相对路径请求 localhost:3001/tmp/... 导致 404。
+    let audioPath: string | null = null;
+    if (audioUrl) {
+      if (audioUrl.startsWith('http')) {
+        audioPath = audioUrl;
+      } else {
+        // cloud:// 等非 http 资源仍需下载到本地
+        audioPath = await downloadAudio(audioUrl);
+      }
+    }
     await setStage(taskId, 'audio_ready');
 
     await setStage(taskId, 'bundling');
@@ -237,7 +332,7 @@ export async function renderTask(taskId: string): Promise<void> {
     console.log('bundle location:', serveUrl);
 
     const inputProps = {
-      bubbles,
+      bubbles: bubblesTimed,
       audioPath: audioPath || '',
       audioDuration,
     };

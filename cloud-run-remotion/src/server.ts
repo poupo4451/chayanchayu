@@ -13,7 +13,7 @@ app.get('/health', (_req, res) => {
 
 // 诊断端点（同步）：只返回环境变量清单，完全不碰数据库，保证一定能返回
 app.get('/debug-env', (_req, res) => {
-  const envId = process.env.TCB_ENV_ID || 'chayanchayu-d4g0fpnxq738c7662';
+  const envId = process.env.TCB_ENV_ID || 'chayan-d1gwl5uub1e0e9d0b';
   const envKeys = Object.keys(process.env).filter(
     (k) => k.startsWith('TENCENTCLOUD') || k.startsWith('TCB') || k.startsWith('CLOUDBASE') || k.startsWith('SCF_'),
   );
@@ -28,7 +28,7 @@ app.get('/debug-env', (_req, res) => {
 
 // 诊断端点：验证云托管实例能否访问 CloudBase 数据库
 app.get('/debug-db', async (_req, res) => {
-  const envId = process.env.TCB_ENV_ID || 'chayanchayu-d4g0fpnxq738c7662';
+  const envId = process.env.TCB_ENV_ID || 'chayan-d1gwl5uub1e0e9d0b';
   let responded = false;
   const guard = setTimeout(() => {
     if (!responded) {
