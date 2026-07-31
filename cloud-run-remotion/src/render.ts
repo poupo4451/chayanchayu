@@ -350,6 +350,9 @@ export async function renderTask(taskId: string): Promise<void> {
     await setStage(taskId, 'rendering_frames');
 
     let lastReportedPct = -1;
+    // 进度写入是异步的，必须收集起来在最终写 completed 之前 await 完，
+    // 否则晚到的进度写入会把 progress:100 覆盖成中间值（如 86 / rendering_35）
+    const progressWrites: Promise<void>[] = [];
     await renderMedia({
       composition,
       serveUrl,
@@ -362,11 +365,12 @@ export async function renderTask(taskId: string): Promise<void> {
           lastReportedPct = pct;
           console.log(`render progress: ${pct}%`);
           // 渲染阶段进度映射到 80-99（最终 100 在上传后）
-          void setStage(taskId, `rendering_${pct}`, 80 + Math.floor(pct * 0.19));
+          progressWrites.push(setStage(taskId, `rendering_${pct}`, 80 + Math.floor(pct * 0.19)));
         }
       },
     });
 
+    await Promise.allSettled(progressWrites);
     await setStage(taskId, 'uploading');
 
     const fileId = await uploadVideo(OUTPUT_PATH, taskId);
@@ -377,6 +381,9 @@ export async function renderTask(taskId: string): Promise<void> {
       status: 'completed',
       progress: 100,
       renderStage: 'completed',
+      // 清理上一次失败残留，避免前端把已完成任务误判为失败
+      errorStage: '',
+      errorMsg: '',
       updatedAt: Date.now(),
     });
 
