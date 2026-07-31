@@ -106,16 +106,23 @@ const server = http.createServer(async (req, res) => {
     await tasksCol.doc(taskId).update({
       data: {
         audioUrl: first.audio_url,
+        audioId: first.id || '',
         audioDuration: first.duration || 0,
         musicTitle: first.title || '',
-        status: 'rendering_video',
-        progress: 75,
+        // 保持 generating_music，等 fetchLyricsTimestamps 拿到时间戳后再进 rendering_video
+        status: 'generating_music',
+        progress: 70,
         updatedAt: Date.now(),
       },
     });
 
-    cloud.callFunction({ name: 'notifyAndFinalize', data: { taskId } }).catch((e) => {
-      console.error('trigger notifyAndFinalize failed', e);
+    // 先抓取歌词逐行时间戳（用于气泡与音乐对齐），由它完成后触发渲染
+    cloud.callFunction({ name: 'fetchLyricsTimestamps', data: { taskId } }).catch((e) => {
+      console.error('trigger fetchLyricsTimestamps failed, fallback to render directly', e);
+      // 时间戳抓取触发失败，降级直接渲染（气泡将均匀分配）
+      cloud.callFunction({ name: 'notifyAndFinalize', data: { taskId } }).catch((err) => {
+        console.error('fallback trigger notifyAndFinalize failed', err);
+      });
     });
 
     return sendJson(res, 200, { received: true });

@@ -8,12 +8,12 @@ const tcb = require('@cloudbase/node-sdk');
 const { STICKER_IDS } = require('./stickers');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
-const app = tcb.init({ env: cloud.DYNAMIC_CURRENT_ENV });
+const app = tcb.init({ env: cloud.DYNAMIC_CURRENT_ENV, timeout: 55000 });
 
 const db = cloud.database();
 
 const MODEL_GROUP = 'cloudbase';
-const MODEL_NAME = 'deepseek-v4-flash';
+const MODEL_NAME = 'hy3';
 
 const VALID_TYPES = ['text', 'time', 'image', 'redpacket', 'transfer'];
 
@@ -142,7 +142,7 @@ exports.main = async (event) => {
 
     let dialogue = null;
     let lastError = null;
-    for (let attempt = 0; attempt < 2 && !dialogue; attempt += 1) {
+    for (let attempt = 0; attempt < 3 && !dialogue; attempt += 1) {
       try {
         dialogue = await callLLMForDialogue(params);
       } catch (e) {
@@ -160,6 +160,8 @@ exports.main = async (event) => {
         dialogue,
         status: 'generating_dialogue',
         progress: 20,
+        errorStage: '',
+        errorMsg: '',
         updatedAt: Date.now(),
       },
     });

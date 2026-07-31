@@ -1,0 +1,9 @@
+{
+  "name": "fetchLyricsTimestamps",
+  "version": "1.0.0",
+  "description": "调用Suno get-timestamped-lyrics获取逐行歌词时间戳，供气泡与音乐对齐",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

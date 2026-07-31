@@ -9,19 +9,67 @@ Page({
 
   onLoad(query) {
     this.setData({ taskId: query.taskId });
+    this.pollCount = 0;
+    this.pollTimer = null;
     this.loadDialogue();
   },
 
+  // 拉取任务并渲染对话；若对话仍在异步生成中，则轮询等待
   async loadDialogue() {
-    this.setData({ loading: true });
     try {
       const task = await getTaskDetail(this.data.taskId);
-      this.setData({ dialogue: task.dialogue || [] });
+      const dialogue = task.dialogue || [];
+
+      // 对话已生成完成
+      if (dialogue.length > 0) {
+        this.setData({ dialogue, loading: false });
+        this.stopPolling();
+        return;
+      }
+
+      // 生成失败：提示用户手动重试
+      if (task.status === 'failed') {
+        this.setData({ loading: false });
+        wx.showToast({ title: task.errorMsg || '生成失败，请点重新生成', icon: 'none' });
+        this.stopPolling();
+        return;
+      }
+
+      // 仍在生成中（pending / generating_dialogue），继续轮询，最多约 60 秒
+      this.pollCount += 1;
+      if (this.pollCount > 20) {
+        this.setData({ loading: false });
+        wx.showToast({ title: '生成超时，请点重新生成', icon: 'none' });
+        this.stopPolling();
+        return;
+      }
+
+      this.setData({ loading: true });
+      this.schedulePoll();
     } catch (e) {
-      wx.showToast({ title: '加载失败', icon: 'none' });
       console.error(e);
-    } finally {
-      this.setData({ loading: false });
+      this.pollCount += 1;
+      if (this.pollCount > 20) {
+        this.setData({ loading: false });
+        wx.showToast({ title: '加载失败', icon: 'none' });
+        this.stopPolling();
+        return;
+      }
+      this.schedulePoll();
+    }
+  },
+
+  schedulePoll() {
+    this.stopPolling();
+    this.pollTimer = setTimeout(() => {
+      this.loadDialogue();
+    }, 3000);
+  },
+
+  stopPolling() {
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = null;
     }
   },
 
@@ -42,6 +90,7 @@ Page({
   },
 
   async onRegenerate() {
+    this.stopPolling();
     wx.showLoading({ title: '重新生成中…' });
     try {
       const task = await regenerateDialogue(this.data.taskId);
@@ -63,5 +112,9 @@ Page({
     } finally {
       wx.hideLoading();
     }
+  },
+
+  onUnload() {
+    this.stopPolling();
   },
 });

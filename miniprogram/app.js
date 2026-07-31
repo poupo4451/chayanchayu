@@ -6,7 +6,7 @@ App({
       console.error('请使用 2.2.3 或以上的基础库以使用云能力');
     } else {
       wx.cloud.init({
-        env: 'chayanchayu-d4g0fpnxq738c7662',
+        env: 'chayan-d1gwl5uub1e0e9d0b',
         traceUser: true,
       });
     }

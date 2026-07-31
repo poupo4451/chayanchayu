@@ -45,10 +45,12 @@ exports.main = async (event, context) => {
 
     const taskId = addRes._id;
 
-    // 触发对话生成云函数（异步调用，不阻塞返回）
-    await cloud.callFunction({
+    // 异步触发对话生成（不 await，避免 LLM 耗时导致 createTask 超时）
+    cloud.callFunction({
       name: 'generateDialogue',
       data: { taskId },
+    }).catch((e) => {
+      console.error('trigger generateDialogue failed', e);
     });
 
     return { success: true, data: { taskId } };
