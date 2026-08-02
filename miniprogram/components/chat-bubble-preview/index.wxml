@@ -7,7 +7,10 @@
   class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
   bindtap="onTap"
 >
-  <view class="avatar avatar-{{line.role || 'left'}}">{{line.name ? line.name[0] : '茶'}}</view>
+  <view class="avatar avatar-{{line.role || 'left'}}">
+    <image wx:if="{{avatarSrc && !avatarError}}" class="avatar-img" src="{{avatarSrc}}" mode="aspectFill" binderror="onAvatarError" />
+    <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
+  </view>
   <image class="bubble-sticker" src="{{line.params.imageUrl}}" mode="aspectFit" />
 </view>
 
@@ -16,7 +19,10 @@
   class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
   bindtap="onTap"
 >
-  <view class="avatar avatar-{{line.role || 'left'}}">{{line.name ? line.name[0] : '茶'}}</view>
+  <view class="avatar avatar-{{line.role || 'left'}}">
+    <image wx:if="{{avatarSrc && !avatarError}}" class="avatar-img" src="{{avatarSrc}}" mode="aspectFill" binderror="onAvatarError" />
+    <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
+  </view>
   <view class="bubble bubble-redpacket">
     <view class="redpacket-top">
       <view class="redpacket-icon">🧧</view>
@@ -32,7 +38,10 @@
   class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
   bindtap="onTap"
 >
-  <view class="avatar avatar-{{line.role || 'left'}}">{{line.name ? line.name[0] : '茶'}}</view>
+  <view class="avatar avatar-{{line.role || 'left'}}">
+    <image wx:if="{{avatarSrc && !avatarError}}" class="avatar-img" src="{{avatarSrc}}" mode="aspectFill" binderror="onAvatarError" />
+    <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
+  </view>
   <view class="bubble bubble-transfer">
     <view class="transfer-top">
       <view class="transfer-icon">￥</view>
@@ -51,7 +60,10 @@
   class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
   bindtap="onTap"
 >
-  <view class="avatar avatar-{{line.role || 'left'}}">{{line.name ? line.name[0] : '茶'}}</view>
+  <view class="avatar avatar-{{line.role || 'left'}}">
+    <image wx:if="{{avatarSrc && !avatarError}}" class="avatar-img" src="{{avatarSrc}}" mode="aspectFill" binderror="onAvatarError" />
+    <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
+  </view>
   <view class="bubble bubble-{{line.role || 'left'}}">
     <text class="bubble-name">{{line.name}}</text>
     <text class="bubble-text">{{line.text}}</text>

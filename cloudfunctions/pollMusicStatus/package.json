@@ -1,0 +1,9 @@
+{
+  "name": "pollMusicStatus",
+  "version": "1.0.0",
+  "description": "定时轮询 Suno 音乐生成状态并推进后续渲染",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

@@ -1,4 +1,4 @@
-<view class="page works-page">
+<view class="page works-page" style="padding-top: {{safeTop}}px;">
   <text class="page-title">我的作品</text>
 
   <block wx:if="{{loading}}">
@@ -10,11 +10,37 @@
     </view>
   </block>
   <block wx:else>
-    <view class="work-card card" wx:for="{{works}}" wx:key="id" data-id="{{item.id}}" bindtap="onOpenWork">
-      <view class="work-cover"></view>
-      <view class="work-info">
-        <text class="work-title">{{item.title}}</text>
-        <text class="work-duration">{{item.duration}}</text>
+    <view class="swipe-item" wx:for="{{works}}" wx:key="id">
+      <!-- 删除按钮（固定在右侧，滑动后才可见） -->
+      <view
+        class="swipe-delete"
+        style="opacity: {{item.swipeX < 0 ? 1 : 0}};"
+        catchtap="onDeleteConfirm"
+        data-index="{{index}}"
+      >
+        <text class="swipe-delete-icon">🗑</text>
+      </view>
+      <!-- 卡片内容（可滑动） -->
+      <view
+        class="swipe-content work-card card {{item.type === 'task' ? 'work-card-pending' : ''}}"
+        style="transform: translateX({{item.swipeX}}px); transition: {{touching ? 'none' : 'transform 0.25s ease'}};"
+        data-index="{{index}}"
+        bindtouchstart="onSwipeStart"
+        bindtouchmove="onSwipeMove"
+        bindtouchend="onSwipeEnd"
+        catchtap="onOpenWork"
+      >
+        <view class="work-cover">
+          <view wx:if="{{item.type === 'task'}}" class="work-cover-spinner"></view>
+        </view>
+        <view class="work-info">
+          <text class="work-title">{{item.title}}</text>
+          <view wx:if="{{item.type === 'task'}}" class="work-status-row">
+            <text class="work-status-badge work-status-badge-{{item.status}}">{{item.statusLabel}}</text>
+            <text class="work-status-progress">{{item.progress}}%</text>
+          </view>
+          <text wx:else class="work-duration">{{item.duration}}</text>
+        </view>
       </view>
     </view>
   </block>

@@ -105,8 +105,8 @@ const server = http.createServer(async (req, res) => {
 
     await tasksCol.doc(taskId).update({
       data: {
-        audioUrl: first.audio_url,
-        audioId: first.id || '',
+        audioUrl: first.audio_url || first.audioUrl || '',
+        audioId: first.id || first.audioId || '',
         audioDuration: first.duration || 0,
         musicTitle: first.title || '',
         // 保持 generating_music，等 fetchLyricsTimestamps 拿到时间戳后再进 rendering_video
@@ -116,14 +116,11 @@ const server = http.createServer(async (req, res) => {
       },
     });
 
-    // 先抓取歌词逐行时间戳（用于气泡与音乐对齐），由它完成后触发渲染
-    cloud.callFunction({ name: 'fetchLyricsTimestamps', data: { taskId } }).catch((e) => {
-      console.error('trigger fetchLyricsTimestamps failed, fallback to render directly', e);
-      // 时间戳抓取触发失败，降级直接渲染（气泡将均匀分配）
-      cloud.callFunction({ name: 'notifyAndFinalize', data: { taskId } }).catch((err) => {
-        console.error('fallback trigger notifyAndFinalize failed', err);
-      });
-    });
+    // 注意：不再通过 cloud.callFunction 触发 fetchLyricsTimestamps。
+    // 原因：云函数间调用存在一条独立于被调函数自身 Timeout 配置的约 3 秒调用通道限制，
+    // fetchLyricsTimestamps 要调用外部 Suno API，容易超过这条限制被平台强杀。
+    // 音频结果已落库，后续由小程序端 task-progress 轮询页检测到
+    // status=generating_music 且已有 audioUrl 时，直接客户端调用 fetchLyricsTimestamps。
 
     return sendJson(res, 200, { received: true });
   } catch (e) {

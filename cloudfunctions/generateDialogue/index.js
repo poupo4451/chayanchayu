@@ -6,14 +6,31 @@
 const cloud = require('wx-server-sdk');
 const tcb = require('@cloudbase/node-sdk');
 const { STICKER_IDS } = require('./stickers');
+const { assignAvatars } = require('./avatarAssign');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const app = tcb.init({ env: cloud.DYNAMIC_CURRENT_ENV, timeout: 55000 });
 
 const db = cloud.database();
 
+// 小程序成长计划升级后的 hy3 通过 cloudbase 模型组调用。
+// 429 是并发限流（环境级默认 10 并发 + 模型全局资源池共享），官方建议退避重试或换模型重试，
+// 且不同模型的资源池相互独立，因此这里在 hy3 / hy3-preview 之间轮换并做指数退避。
 const MODEL_GROUP = 'cloudbase';
-const MODEL_NAME = 'hy3';
+const MODEL_CANDIDATES = ['hy3', 'hy3-preview'];
+const MAX_ATTEMPTS = 6;
+const RETRY_BASE_DELAY_MS = 1500;
+const RETRY_MAX_DELAY_MS = 8000;
+// 云函数超时 60s，留出数据库读写与冷启动余量后的 LLM 总预算
+const TOTAL_LLM_BUDGET_MS = 45000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitError(e) {
+  return !!e && (String(e.code) === '429' || /429/.test(e.message || ''));
+}
 
 const VALID_TYPES = ['text', 'time', 'image', 'redpacket', 'transfer'];
 
@@ -25,10 +42,10 @@ function buildPrompt({ topic, tone }) {
 
 要求：
 1. 严格输出 JSON 数组，不要输出任何多余文字、markdown代码块标记或解释
-2. 数组包含 8~10 轮对话，交替出现 left/right 两个角色
+2. 数组包含 12~30 轮对话，交替出现 left/right 两个角色；具体轮数由剧情节奏和信息量自然决定——情节简单就少一点（12~18轮左右），情节有起承转合、需要铺垫反转就多一点（可以到25~30轮），但不要为了凑数而注水、重复啰嗦或硬拉长
 3. 每个元素默认格式：{"role":"left"或"right","name":"角色昵称","type":"text","text":"对话内容"}
 4. 角色昵称要符合主题人设（2~4个字），对话内容口语化、有反转或包袱，单条不超过40字，可适当使用emoji调味
-5. 【特殊消息类型】除了默认的 "text"，你还可以使用以下类型让对话更生动，但整段对话中【非text类型总共最多出现1~2条，且不能是第一条或最后一条】：
+5. 【特殊消息类型】除了默认的 "text"，你还可以使用以下类型让对话更生动，但整段对话中【非text类型总共最多出现2~4条，且不能是第一条或最后一条】：
    - "time"：居中的时间分隔条，格式：{"role":"left","name":"","type":"time","text":"14:32"}（text为时间文案，role随意填但不会显示）
    - "image"：发一个表情包，格式：{"role":"left"或"right","name":"角色昵称","type":"image","text":"","params":{"stickerId":"从下面列表中选一个"}}，stickerId 可选值：${STICKER_IDS.join('、')}
    - "redpacket"：发红包，格式：{"role":"left"或"right","name":"角色昵称","type":"redpacket","text":"祝福语（不超过10字）","params":{"amount":"金额数字字符串，如8.88"}}
@@ -94,12 +111,13 @@ function parseDialogueResult(text) {
   });
   if (!valid) return null;
 
-  // 归一化：补全默认 type，非法/多余的特殊类型条数做兜底（超过2条的后续全部降级为text）
+  // 归一化：补全默认 type，非法/多余的特殊类型条数做兜底（超过上限的后续全部降级为text）
+  const MAX_EXTRA_TYPES = 4;
   let extraCount = 0;
   const normalized = parsed.map((item, idx) => {
     const type = item.type || 'text';
     const isFirstOrLast = idx === 0 || idx === parsed.length - 1;
-    if (type !== 'text' && (isFirstOrLast || extraCount >= 2)) {
+    if (type !== 'text' && (isFirstOrLast || extraCount >= MAX_EXTRA_TYPES)) {
       return { role: item.role, name: item.name, type: 'text', text: item.text || '...' };
     }
     if (type !== 'text') extraCount += 1;
@@ -109,13 +127,13 @@ function parseDialogueResult(text) {
   return normalized;
 }
 
-async function callLLMForDialogue({ topic, tone }) {
+async function callLLMForDialogue({ topic, tone, modelName }) {
   const ai = app.ai();
   const model = ai.createModel(MODEL_GROUP);
   const prompt = buildPrompt({ topic, tone });
 
   const result = await model.generateText({
-    model: MODEL_NAME,
+    model: modelName,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.9,
   });
@@ -142,18 +160,43 @@ exports.main = async (event) => {
 
     let dialogue = null;
     let lastError = null;
-    for (let attempt = 0; attempt < 3 && !dialogue; attempt += 1) {
+    const startedAt = Date.now();
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS && !dialogue; attempt += 1) {
+      const modelName = MODEL_CANDIDATES[attempt % MODEL_CANDIDATES.length];
       try {
-        dialogue = await callLLMForDialogue(params);
+        dialogue = await callLLMForDialogue({ ...params, modelName });
       } catch (e) {
         lastError = e;
-        console.error(`generateDialogue LLM attempt ${attempt} failed`, e);
+        console.error(
+          `generateDialogue LLM attempt ${attempt} failed (model=${modelName}, rateLimited=${isRateLimitError(e)})`,
+          e.message
+        );
       }
+
+      if (dialogue) break;
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= TOTAL_LLM_BUDGET_MS || attempt === MAX_ATTEMPTS - 1) break;
+
+      // 限流场景必须退避等待；解析失败则短暂等待后换模型再试
+      const delay = isRateLimitError(lastError)
+        ? Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS)
+        : 500;
+      const remaining = TOTAL_LLM_BUDGET_MS - elapsed;
+      if (remaining <= delay) break;
+      await sleep(delay);
     }
 
     if (!dialogue) {
+      if (isRateLimitError(lastError)) {
+        throw new Error('AI服务当前繁忙（并发受限），请稍后重试');
+      }
       throw new Error((lastError && lastError.message) || 'AI对话生成解析失败，请重试');
     }
+
+    // 为每个说话人稳定分配默认头像标识（如 male-2），全程保持一致
+    dialogue = assignAvatars(dialogue);
 
     await tasksCol.doc(taskId).update({
       data: {

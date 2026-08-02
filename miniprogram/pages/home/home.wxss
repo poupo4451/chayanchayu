@@ -46,7 +46,8 @@
 .fab-create {
   position: fixed;
   right: 40rpx;
-  bottom: 140rpx;
+  /* 底部悬浮按钮需叠加自定义 tab-bar 高度(110rpx) + 系统底部安全区，否则灵动岛/无 Home 键机型会被 tab-bar 压住 */
+  bottom: calc(110rpx + env(safe-area-inset-bottom) + 30rpx);
   height: 88rpx;
   padding: 0 40rpx;
   display: flex;

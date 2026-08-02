@@ -19,6 +19,7 @@
   font-size: 14px;
   font-weight: 600;
   flex-shrink: 0;
+  overflow: hidden;
   background: linear-gradient(135deg, #7C3AED 0%, #FF2D78 100%);
 }
 
@@ -31,27 +32,34 @@
   margin-right: 16rpx;
 }
 
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 气泡配色还原真实微信：自己发送用微信绿，对方用白底，与最终 MV 渲染保持"预览即所见" */
 .bubble {
   max-width: 460rpx;
   padding: 16rpx 24rpx;
-  border-radius: 20rpx;
-  background: rgba(255,255,255,0.08);
+  border-radius: 12rpx;
+  background: #FFFFFF;
 }
 
 .bubble-right {
-  background: linear-gradient(135deg, rgba(255,45,120,0.4) 0%, rgba(124,58,237,0.4) 100%);
+  background: #95EC69;
 }
 
 .bubble-name {
   display: block;
   font-size: 11px;
-  color: var(--text-sub);
+  color: #B2B2B2;
   margin-bottom: 6rpx;
 }
 
 .bubble-text {
   font-size: 14px;
-  color: #fff;
+  color: #191919;
   line-height: 1.5;
 }
 

@@ -1,12 +1,13 @@
 /**
  * generateMusic 云函数（Event Function）
  * 职责：调用 Suno API（sunoapi.org）提交音乐生成任务
- * 音乐生成本身耗时1-3分钟，远超云函数超时限制，因此本函数只负责"提交任务"，
- * 不做轮询等待；真正的结果获取由 musicCallback（HTTP Function）接收 Suno 回调完成。
+ * 音乐生成本身耗时 1-3 分钟，远超云函数超时限制，因此本函数只负责"提交任务"。
+ * 后续结果优先通过 pollMusicStatus 主动轮询推进；若配置了 musicCallback HTTP 回调，也可作为补充通道。
  */
 const cloud = require('wx-server-sdk');
 const https = require('https');
 const { URL } = require('url');
+const { buildSunoStyle } = require('./musicStyleDict');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
@@ -14,6 +15,7 @@ const db = cloud.database();
 
 const SUNO_API_KEY = process.env.SUNO_API_KEY;
 const SUNO_BASE_URL = process.env.SUNO_BASE_URL || 'https://api.sunoapi.org';
+const SUNO_SUBMIT_BASE_URL = process.env.SUNO_SUBMIT_BASE_URL || (SUNO_BASE_URL.includes('://api.') ? SUNO_BASE_URL : 'https://api.sunoapi.org');
 // musicCallback 云函数的公网访问地址（如 https://xxx.tcloudbaseapp.com/musicCallback），
 // 由部署时通过环境变量注入
 const MUSIC_CALLBACK_BASE_URL = process.env.MUSIC_CALLBACK_BASE_URL;
@@ -49,7 +51,8 @@ function httpsPostJson(urlStr, bodyObj, headers) {
           try {
             json = JSON.parse(body);
           } catch (e) {
-            return reject(new Error(`Suno响应解析失败: ${body}`));
+            const preview = body ? body.slice(0, 200) : '[empty body]';
+            return reject(new Error(`Suno响应解析失败: HTTP ${res.statusCode}, body=${preview}`));
           }
           resolve({ statusCode: res.statusCode, json });
         });
@@ -62,27 +65,27 @@ function httpsPostJson(urlStr, bodyObj, headers) {
   });
 }
 
-async function submitSunoTask({ taskId, lyrics, genre }) {
+async function submitSunoTask({ taskId, lyrics, genre, vocalMode }) {
   if (!SUNO_API_KEY) {
     throw new Error('缺少 SUNO_API_KEY 环境变量配置');
   }
-  if (!MUSIC_CALLBACK_BASE_URL) {
-    throw new Error('缺少 MUSIC_CALLBACK_BASE_URL 环境变量配置');
-  }
 
-  const callBackUrl = `${MUSIC_CALLBACK_BASE_URL}?taskId=${encodeURIComponent(taskId)}`;
+  const style = buildSunoStyle(genre || '嘻哈', vocalMode);
 
   const body = {
     customMode: true,
     instrumental: false,
     model: 'V4_5',
-    callBackUrl,
     prompt: truncate(lyrics, 4900),
-    style: truncate(genre || '嘻哈', 900),
+    style: truncate(style, 900),
     title: truncate(`茶言茶曲-${String(taskId).slice(-6)}`, 90),
   };
 
-  const { statusCode, json } = await httpsPostJson(`${SUNO_BASE_URL}/api/v1/generate`, body, {
+  if (MUSIC_CALLBACK_BASE_URL) {
+    body.callBackUrl = `${MUSIC_CALLBACK_BASE_URL}?taskId=${encodeURIComponent(taskId)}`;
+  }
+
+  const { statusCode, json } = await httpsPostJson(`${SUNO_SUBMIT_BASE_URL}/api/v1/generate`, body, {
     authorization: `Bearer ${SUNO_API_KEY}`,
   });
 
@@ -113,6 +116,7 @@ exports.main = async (event) => {
       taskId,
       lyrics: task.lyrics,
       genre: task.style && task.style.musicGenre,
+      vocalMode: task.style && task.style.vocalMode,
     });
 
     await tasksCol.doc(taskId).update({
@@ -120,12 +124,15 @@ exports.main = async (event) => {
         musicProviderTaskId: providerTaskId,
         status: 'generating_music',
         progress: 65,
+        errorStage: '',
+        errorMsg: '',
         updatedAt: Date.now(),
       },
     });
 
-    // 后续流程：等待 Suno 通过 callBackUrl 回调 musicCallback 云函数，
-    // 拿到音频结果后由 musicCallback 更新任务状态并触发 notifyAndFinalize
+    // 后续流程：由 pollMusicStatus（每分钟定时触发）或 musicCallback（Suno回调）
+    // 主动查询/接收 Suno 任务结果，写回 audioUrl 到 tasks；再由小程序端 task-progress
+    // 轮询页检测到 audioUrl 后直接客户端调用 fetchLyricsTimestamps，避免云函数间调用的耗时限制。
     return { success: true, data: { taskId, providerTaskId } };
   } catch (e) {
     console.error('generateMusic error', e);

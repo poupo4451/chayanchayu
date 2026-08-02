@@ -30,6 +30,8 @@ Component({
 
     switchTab(e) {
       const { path } = e.currentTarget.dataset;
+      const index = this.data.list.findIndex((item) => item.pagePath === path);
+      if (index !== -1) this.setData({ selected: index });
       wx.switchTab({ url: path });
     },
   },

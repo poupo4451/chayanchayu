@@ -2,7 +2,7 @@ Page({
   data: {
     topic: '',
     dialogueTones: ['绿茶', '搞笑', '毒舌'],
-    musicGenres: ['嘻哈', 'R&B', '随机'],
+    musicGenres: ['嘻哈', 'R&B', '流行', '抖音风', '粤语说唱', '随机'],
     selectedTone: '绿茶',
     selectedGenre: '嘻哈',
     submitting: false,
@@ -29,13 +29,14 @@ Page({
     try {
       const { createTask } = require('../../utils/api');
       const { taskId } = await createTask({
-        topic: this.data.topic,
+        topic: this.data.topic.trim(),
         dialogueTone: this.data.selectedTone,
         musicGenre: this.data.selectedGenre,
       });
       wx.navigateTo({ url: `/pages/dialogue-preview/dialogue-preview?taskId=${taskId}` });
     } catch (e) {
-      wx.showToast({ title: '创建任务失败', icon: 'none' });
+      const message = (e && e.message) || '创建任务失败';
+      wx.showToast({ title: message.slice(0, 20), icon: 'none' });
       console.error(e);
     } finally {
       this.setData({ submitting: false });

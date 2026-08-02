@@ -8,6 +8,10 @@
     </view>
     <text class="progress-num">{{progress}}%</text>
 
+    <block wx:if="{{hint && !failed}}">
+      <text class="stage-hint">{{hint}}</text>
+    </block>
+
     <block wx:if="{{failed}}">
       <text class="error-msg">{{errorMsg || '生成失败，请稍后重试'}}</text>
     </block>

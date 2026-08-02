@@ -13,7 +13,7 @@ app.get('/health', (_req, res) => {
 
 // 诊断端点（同步）：只返回环境变量清单，完全不碰数据库，保证一定能返回
 app.get('/debug-env', (_req, res) => {
-  const envId = process.env.TCB_ENV_ID || 'chayan-d1gwl5uub1e0e9d0b';
+  const envId = 'cloud1-d7ggdqfhgc4ee2796';
   const envKeys = Object.keys(process.env).filter(
     (k) => k.startsWith('TENCENTCLOUD') || k.startsWith('TCB') || k.startsWith('CLOUDBASE') || k.startsWith('SCF_'),
   );
@@ -28,7 +28,7 @@ app.get('/debug-env', (_req, res) => {
 
 // 诊断端点：验证云托管实例能否访问 CloudBase 数据库
 app.get('/debug-db', async (_req, res) => {
-  const envId = process.env.TCB_ENV_ID || 'chayan-d1gwl5uub1e0e9d0b';
+  const envId = 'cloud1-d7ggdqfhgc4ee2796';
   let responded = false;
   const guard = setTimeout(() => {
     if (!responded) {
@@ -37,7 +37,10 @@ app.get('/debug-db', async (_req, res) => {
     }
   }, 3000);
   try {
-    const diagApp = tcb.init({ env: envId } as never);
+    const diagApp = tcb.init({
+      env: envId,
+      ...(process.env.CLOUDBASE_APIKEY ? { accessKey: process.env.CLOUDBASE_APIKEY } : {}),
+    } as never);
     const r = (await diagApp.database().collection('tasks').limit(1).get()) as { data?: unknown[] };
     if (!responded) {
       responded = true;

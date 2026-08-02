@@ -4,7 +4,8 @@
     "pages/create/create",
     "pages/dialogue-preview/dialogue-preview",
     "pages/task-progress/task-progress",
-    "pages/my-works/my-works"
+    "pages/my-works/my-works",
+    "pages/my-works/detail"
   ],
   "window": {
     "backgroundTextStyle": "dark",

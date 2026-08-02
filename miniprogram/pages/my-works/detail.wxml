@@ -1,0 +1,72 @@
+<view class="detail-page">
+  <view class="back-btn" style="top: {{safeTop}}px;" bindtap="onBack">
+    <text class="back-icon">‹</text>
+  </view>
+
+  <block wx:if="{{loading}}">
+    <view class="state-layer">
+      <view class="loading-spinner"></view>
+      <text class="state-text">正在加载视频…</text>
+    </view>
+  </block>
+
+  <block wx:elif="{{loadError}}">
+    <view class="state-layer">
+      <text class="state-title">{{work.title}}</text>
+      <text class="state-text">{{loadError}}</text>
+      <view class="retry-btn" bindtap="onRetry">
+        <text>重新加载</text>
+      </view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <video
+      id="workVideo"
+      class="fullscreen-video"
+      src="{{work.playUrl}}"
+      object-fit="cover"
+      autoplay
+      loop="{{false}}"
+      controls="{{false}}"
+      show-fullscreen-btn="{{false}}"
+      show-casting-button="{{false}}"
+      show-mute-btn="{{false}}"
+      enable-progress-gesture="{{false}}"
+      bindtap="onVideoTap"
+      bindplay="onPlay"
+      bindpause="onPause"
+      bindended="onEnded"
+      bindtimeupdate="onTimeUpdate"
+      binderror="onVideoError"
+    ></video>
+
+    <view class="controls-overlay {{showControls ? 'controls-visible' : 'controls-hidden'}}">
+      <view class="top-gradient" style="height: calc({{safeTop}}px + 100rpx);"></view>
+      <text class="video-title" style="top: {{safeTop}}px;">{{work.title}}</text>
+
+      <view class="center-play" wx:if="{{!playing}}" bindtap="onTogglePlay">
+        <text class="play-icon">▶</text>
+      </view>
+
+      <view class="bottom-bar" style="padding-bottom: calc({{safeBottom}}px + 24rpx);">
+        <view class="play-btn-small" bindtap="onTogglePlay">
+          <text>{{playing ? '❙❙' : '▶'}}</text>
+        </view>
+        <text class="time-text">{{currentTimeText}}</text>
+        <slider
+          class="progress-slider"
+          value="{{progressPercent}}"
+          min="0"
+          max="100"
+          block-size="11"
+          activeColor="#FF2D78"
+          backgroundColor="rgba(255,255,255,0.3)"
+          bindchanging="onSeekChange"
+          bindchange="onSeekChange"
+        />
+        <text class="time-text">{{durationText}}</text>
+      </view>
+    </view>
+  </block>
+</view>

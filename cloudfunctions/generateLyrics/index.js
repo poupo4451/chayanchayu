@@ -1,119 +1,201 @@
 /**
  * generateLyrics 云函数（Event Function）
- * 职责：调用真实 LLM（CloudBase AI，deepseek-v4-flash）将对话内容改编为指定风格歌词，
- * 并同时产出「歌词行 → 对话索引」映射（lineMap），用于后续把音频时间戳对齐到聊天气泡。
- * 然后触发 generateMusic。
+ * 职责：调用真实 LLM（CloudBase AI，deepseek-v4-flash）把对话逐条改写成歌词，
+ * 并由代码确定性生成「歌词行 → 对话索引」映射（lineMap），用于后续把音频时间戳对齐到聊天气泡。
+ * 不再由本函数触发 generateMusic（原因见文末 exports.main 内注释），
+ * 由小程序端 task-progress 轮询页检测到 status=generating_music 且尚无
+ * musicProviderTaskId 时直接客户端调用。
+ *
+ * 设计要点（与旧版本的关键区别）：
+ * - 旧版本让 LLM 把整段对话"改编"成一首带副歌重复结构的完整歌曲，内容被大幅重写、
+ *   条数被压缩/复用，导致歌词与对话对不上、歌词与旋律也很难精确对齐。
+ * - 新版本要求"每条对话对应且仅对应一句唱词"，顺序、数量严格跟对话走，不允许合并/
+ *   拆分/增删/重复。lines 数量与对话条数是否一致由**代码**校验兜底，不完全依赖 LLM
+ *   自觉遵守，即使 LLM 漏行/多行/完全失败，也会用兜底文案补齐，保证行数=对话数。
+ * - lineMap 不再让 LLM 猜，而是代码按对话顺序确定性拼出，杜绝映射出错的风险。
  *
  * 输出存储（降级安全）：
  * - task.lyrics：纯文本歌词（generateMusic 读它提交 Suno，零影响）
- * - task.lyricsLineMap：[{lineIndex, dialogueIndex}]（解析失败则为 []，渲染时降级均匀分配）
+ * - task.lyricsLineMap：[{lineIndex, dialogueIndex}]（dialogueIndex=-1 表示分声部标记行，不参与气泡对齐）
  */
 const cloud = require('wx-server-sdk');
 const tcb = require('@cloudbase/node-sdk');
+const { assignSpeakerGenders } = require('./genderAssign');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const app = tcb.init({ env: cloud.DYNAMIC_CURRENT_ENV, timeout: 55000 });
 
 const db = cloud.database();
 
+// 小程序成长计划升级后的 hy3 通过 cloudbase 模型组调用。
+// 429 为并发限流，官方建议退避重试或换模型重试（不同模型资源池独立）。
 const MODEL_GROUP = 'cloudbase';
-const MODEL_NAME = 'hy3';
+const MODEL_CANDIDATES = ['hy3', 'hy3-preview'];
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 1500;
+const RETRY_MAX_DELAY_MS = 6000;
+// 云函数超时 60s，这里限制 LLM 总耗时预算，超出即走兜底唱词，避免被平台掐断
+const TOTAL_LLM_BUDGET_MS = 40000;
 
-// 带序号的对话清单，让 LLM 能精确映射 dialogueIndex
-function formatDialogueWithIndex(dialogue) {
-  return (dialogue || []).map((d, i) => {
-    const type = d.type || 'text';
-    if (type === 'time') {
-      return `[${i}] 〔时间跳转到${d.text}〕`;
-    }
-    if (type === 'image') {
-      return `[${i}] 〔${d.name}发了一个表情包〕`;
-    }
-    if (type === 'redpacket') {
-      const amount = d.params && d.params.amount;
-      return `[${i}] 〔${d.name}发了一个红包${amount ? `，金额${amount}元` : ''}${d.text ? `，留言"${d.text}"` : ''}〕`;
-    }
-    if (type === 'transfer') {
-      const amount = d.params && d.params.amount;
-      return `[${i}] 〔${d.name}转账${amount ? `${amount}元` : ''}${d.text ? `，备注"${d.text}"` : ''}〕`;
-    }
-    return `[${i}] ${d.name}: ${d.text}`;
-  }).join('\n');
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildPrompt({ dialogue, genre }) {
-  const lines = formatDialogueWithIndex(dialogue);
-  return `你是一位说唱/流行歌曲词作者。请把下面这段聊天对话改编成一首完整的中文歌词，风格为「${genre}」，并同时给出歌词行与对话条目的映射。
-
-聊天对话内容（每行开头的 [数字] 是对话条目序号，用于映射）：
-${lines}
-
-要求：
-1. 保留对话中的核心情节、梗和情绪冲突，转化为押韵、朗朗上口的歌词
-2. 对话中的「〔〕」标注是场景提示（时间跳跃、发红包、转账、发表情包等动作），请在歌词中自然融入这些情节，但不要原样照搬括号格式
-3. 使用 [Intro] [Verse 1] [Hook] [Verse 2] [Outro] 等段落标记分段（可根据内容适当增减段落）
-4. 歌词整体贴合「${genre}」的节奏感和用词习惯
-5. 总字数控制在120~220字之间（精简为主，便于快速生成与对齐）
-6. 严格输出 JSON 对象，不要输出任何解释、说明或 markdown 代码块标记
-
-输出 JSON 格式：
-{
-  "lyrics": "完整歌词文本（含 [Verse] 等段落标记，每行用 \\n 分隔）",
-  "lineMap": [
-    {"lineIndex": 0, "dialogueIndex": 0},
-    {"lineIndex": 1, "dialogueIndex": 0},
-    {"lineIndex": 2, "dialogueIndex": 2},
-    ...
-  ]
+function isRateLimitError(e) {
+  return !!e && (String(e.code) === '429' || /429/.test(e.message || ''));
 }
 
-lineMap 规则：
-- lineIndex：歌词按 \\n 切分后的行号（从0开始，含 [Intro]/[Verse] 等段落标记行）
-- dialogueIndex：该歌词行源自哪条对话条目（用对话开头的 [数字]）
-- 一条对话可对应多行歌词（多次出现）；纯段落标记行或间奏行若无对应对话，dialogueIndex 填 -1
-- lineMap 必须覆盖歌词的每一行，长度等于歌词行数`;
+const RANDOM_GENRE_POOL = ['嘻哈', 'R&B', '流行', '抖音风', '粤语说唱'];
+
+function resolveGenre(genre) {
+  if (genre === '随机' || !genre) {
+    return RANDOM_GENRE_POOL[Math.floor(Math.random() * RANDOM_GENRE_POOL.length)];
+  }
+  return genre;
 }
 
-async function callLLMForLyrics({ dialogue, genre }) {
+/** 过滤掉 "time" 类型（时间跳转条，没有实际唱词内容），保留原始 dialogue 下标 */
+function getSingableEntries(dialogue) {
+  return (dialogue || [])
+    .map((d, index) => ({ ...d, _originalIndex: index }))
+    .filter((d) => (d.type || 'text') !== 'time');
+}
+
+/** 每条对话的兜底唱词：LLM 缺行/漏行/完全失败时用它保证「行数=对话数」这条硬约束 */
+function fallbackLine(entry) {
+  const type = entry.type || 'text';
+  if (type === 'image') return `${entry.name || '有人'}丢来一个表情包`;
+  if (type === 'redpacket') {
+    return `${entry.name || '有人'}发了个红包${entry.text ? `，写着${entry.text}` : ''}`.trim();
+  }
+  if (type === 'transfer') {
+    return `${entry.name || '有人'}悄悄转了笔钱${entry.text ? `，备注${entry.text}` : ''}`.trim();
+  }
+  return (entry.text || '').trim() || '沉默了几秒';
+}
+
+// 带本地序号（0..N-1，不含 time 条目）的清单，供 LLM 逐条对应改写
+function formatSingableList(entries) {
+  return entries
+    .map((d, i) => {
+      const type = d.type || 'text';
+      if (type === 'image') return `[${i}] 〔${d.name}发了一个表情包〕`;
+      if (type === 'redpacket') {
+        const amount = d.params && d.params.amount;
+        return `[${i}] 〔${d.name}发了一个红包${amount ? `，金额${amount}元` : ''}${d.text ? `，留言"${d.text}"` : ''}〕`;
+      }
+      if (type === 'transfer') {
+        const amount = d.params && d.params.amount;
+        return `[${i}] 〔${d.name}转账${amount ? `${amount}元` : ''}${d.text ? `，备注"${d.text}"` : ''}〕`;
+      }
+      return `[${i}] ${d.name}: ${d.text}`;
+    })
+    .join('\n');
+}
+
+function buildPrompt({ entries, genre, genderInfo }) {
+  const list = formatSingableList(entries);
+  const { speakerOrder, genderByName, isDuet } = genderInfo;
+  const n = entries.length;
+
+  const speakerGenderDesc = speakerOrder
+    .map((name) => `「${name}」→ ${genderByName.get(name) === 'female' ? '女声' : '男声'}`)
+    .join('；');
+
+  const vocalNote = isDuet
+    ? `本次是男女对唱：不同说话人的台词请按各自声部的语气/用词来写（说话人与声部对应：${speakerGenderDesc}），系统会自动在声部切换处插入分声部标记，你不需要自己写任何 [Verse]/[Chorus]/[Male]/[Female] 之类的段落或声部标记。`
+    : `本次是单人视角：全部按 ${genderByName.get(speakerOrder[0]) === 'female' ? '女声' : '男声'} 的语气写，不需要写任何段落标记。`;
+
+  const cantoneseNote = genre === '粤语说唱'
+    ? '\n- 这是粤语说唱，每一句都要用粤语口语用词和粤语押韵习惯书写（比如"佈/嘅/唔/係/咩/啦"这类字词），不要写成普通话。'
+    : '';
+
+  return `你是一位专业说唱/流行歌曲词作者。下面是一段完整聊天对话，请把它逐条改写成可以演唱的歌词——**每一条对话对应且仅对应一句唱词，不合并、不拆分、不增删、不调换顺序、全曲不允许出现重复的记忆点副歌**，风格为「${genre}」。
+
+聊天对话内容（共 ${n} 条，每行开头 [数字] 是序号，输出时必须严格按这个顺序一一对应）：
+${list}
+
+说话人声部：${vocalNote}
+
+歌词改写硬性要求：
+1. 输出的 lines 数组长度必须严格等于 ${n}，第 i 句唱词对应且仅对应上面第 [i] 条对话，顺序不能变、不能跳过。
+2. 内容、情节、语义要紧贴对应那条对话本身，不能编造原对话里没有的情节，不能把这条对话的内容写到别的句子里，也不能省略这条对话的关键信息——整首词唱下来就是把这段对话原样唱一遍。
+3. 允许的调整仅限于：换成更押韵/更有唱感的措辞、补语气词、精简重复口语、微调语序——但不能改变原意，不能大段重写。
+4. 严禁整首词出现"副歌重复/记忆点钩子"式的整句复制粘贴——就算原对话里两条内容相近，这两句唱词也要各自独立措辞，不能写成完全相同或几乎相同的句子，情绪和记忆点也要通过歌词本身的措辞、押韵和情节推进来表达，不能靠重复一句话来制造。
+5. 严禁把对话中任何说话人的昵称/称呼原样写进歌词正文。
+6. 「〔〕」标注的是特殊消息（表情包/红包/转账），用一句简短唱词描述这个动作或它带来的情绪即可，不要照搬括号里的模板文字。
+7. 押韵、节奏、flow 感尽量兼顾，但字数不用整齐划一——短的对话就写短句，长的对话就写长句，自然交替，不要为了凑字数硬拉长或硬缩短原意。${cantoneseNote}
+8. 严格输出 JSON 对象，不要输出任何解释、说明或 markdown 代码块标记。
+
+输出 JSON 格式（lines 数组长度必须严格等于 ${n}）：
+{"lines": ["第0条对应的唱词", "第1条对应的唱词", "..."]}`;
+}
+
+async function callLLMForLyrics({ entries, genre, genderInfo, modelName }) {
   const ai = app.ai();
   const model = ai.createModel(MODEL_GROUP);
-  const prompt = buildPrompt({ dialogue, genre });
+  const prompt = buildPrompt({ entries, genre, genderInfo });
 
   const result = await model.generateText({
-    model: MODEL_NAME,
+    model: modelName,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.85,
   });
 
-  const raw = (result.text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-  return raw;
+  return (result.text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
 }
 
-// 解析 LLM 输出，分离出纯文本 lyrics 和 lineMap；失败则降级
-function parseLyricsResult(raw) {
-  let lyrics = '';
-  let lineMap = [];
-
+// 解析 LLM 输出的 lines 数组；解析失败或数量不对时不抛错，交给 reconcileLines 兜底补齐/截断
+function parseLinesResult(raw) {
   try {
-    const obj = JSON.parse(raw);
-    if (obj && typeof obj.lyrics === 'string') {
-      lyrics = obj.lyrics.trim();
-    }
-    if (obj && Array.isArray(obj.lineMap)) {
-      lineMap = obj.lineMap
-        .filter((m) => m && typeof m.lineIndex === 'number' && typeof m.dialogueIndex === 'number')
-        .map((m) => ({ lineIndex: m.lineIndex, dialogueIndex: m.dialogueIndex }));
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    const jsonStr = start !== -1 && end !== -1 && end > start ? raw.slice(start, end + 1) : raw;
+    const obj = JSON.parse(jsonStr);
+    if (obj && Array.isArray(obj.lines)) {
+      return obj.lines.map((s) => (typeof s === 'string' ? s.trim() : ''));
     }
   } catch (_) {
-    // JSON 解析失败：降级，把整段当纯文本歌词
-    lyrics = raw;
+    // 忽略，走兜底
   }
+  return [];
+}
 
-  // 如果 lyrics 解析出来了但 lineMap 空，尝试纯文本兜底
-  if (!lyrics) {
-    lyrics = raw;
-  }
+/**
+ * 把 LLM 生成的 lines 严格对齐到 entries 数量：
+ * 多了截断；少了/该位置为空的用兜底唱词补齐。
+ * 保证「对话有多少条，歌词就有多少句、顺序完全一致」这条硬约束由代码兜底，不完全依赖 LLM。
+ */
+function reconcileLines(llmLines, entries) {
+  return entries.map((entry, i) => {
+    const line = llmLines[i];
+    return line && line.trim() ? line.trim() : fallbackLine(entry);
+  });
+}
 
+/**
+ * 按声部切换插入分段标记（如 [Female]/[Male]），并生成最终 lyrics 文本 + lyricsLineMap。
+ * 标记行 dialogueIndex 记为 -1——渲染对齐层（lyricsAlign.ts）已知 -1 会被跳过，
+ * 且 `[Female]`/`[Male]` 这种括号包裹的短行本身也会被判定为「段落标记行」，不影响气泡时间轴。
+ */
+function assembleLyrics({ entries, lines, genderInfo }) {
+  const { genderByName, isDuet } = genderInfo;
+  const rows = [];
+  let lastGender = null;
+
+  entries.forEach((entry, i) => {
+    if (isDuet) {
+      const gender = genderByName.get(entry.name) === 'female' ? 'female' : 'male';
+      if (gender !== lastGender) {
+        rows.push({ text: gender === 'female' ? '[Female]' : '[Male]', dialogueIndex: -1 });
+        lastGender = gender;
+      }
+    }
+    rows.push({ text: lines[i], dialogueIndex: entry._originalIndex });
+  });
+
+  const lyrics = rows.map((r) => r.text).join('\n');
+  const lineMap = rows.map((r, lineIndex) => ({ lineIndex, dialogueIndex: r.dialogueIndex }));
   return { lyrics, lineMap };
 }
 
@@ -129,47 +211,80 @@ exports.main = async (event) => {
     const taskRes = await tasksCol.doc(taskId).get();
     const task = taskRes.data;
 
-    let lyrics = null;
-    let lineMap = [];
+    const genre = resolveGenre(task.style && task.style.musicGenre);
+    const genderInfo = assignSpeakerGenders(task.dialogue);
+    const entries = getSingableEntries(task.dialogue);
+
+    if (entries.length === 0) {
+      throw new Error('对话内容为空，无法生成歌词');
+    }
+
+    let llmLines = [];
     let lastError = null;
-    // 注意：微信云函数超时上限 60s，单次 SDK 超时已设 55s；此处只试 1 次，
-    // 避免 2 次重试累计 110s 超过平台限制被直接掐断。
-    for (let attempt = 0; attempt < 1 && !lyrics; attempt += 1) {
+    const startedAt = Date.now();
+    // 429 是并发限流，瞬发重试只会持续被拒；这里做退避 + 模型轮换，
+    // 并用总预算限制耗时。即使全部失败，下面也会用兜底唱词补齐，不阻塞主流程。
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const modelName = MODEL_CANDIDATES[attempt % MODEL_CANDIDATES.length];
       try {
-        const raw = await callLLMForLyrics({
-          dialogue: task.dialogue,
-          genre: task.style.musicGenre,
-        });
-        const parsed = parseLyricsResult(raw);
-        if (parsed.lyrics) {
-          lyrics = parsed.lyrics;
-          lineMap = parsed.lineMap;
+        const raw = await callLLMForLyrics({ entries, genre, genderInfo, modelName });
+        llmLines = parseLinesResult(raw);
+        if (llmLines.length > 0) {
+          lastError = null;
+          break;
         }
       } catch (e) {
         lastError = e;
-        console.error(`generateLyrics LLM attempt ${attempt} failed`, e);
+        console.error(
+          `generateLyrics LLM attempt ${attempt} failed (model=${modelName}, rateLimited=${isRateLimitError(e)}):`,
+          e.message
+        );
       }
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= TOTAL_LLM_BUDGET_MS || attempt === MAX_ATTEMPTS - 1) break;
+
+      const delay = isRateLimitError(lastError)
+        ? Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS)
+        : 500;
+      if (TOTAL_LLM_BUDGET_MS - elapsed <= delay) break;
+      await sleep(delay);
     }
 
-    if (!lyrics) {
-      throw new Error((lastError && lastError.message) || 'AI歌词生成失败，请重试');
+    if (lastError) {
+      console.error('generateLyrics LLM unavailable, fallback to raw dialogue text');
     }
+
+    if (llmLines.length !== entries.length) {
+      console.warn(
+        `generateLyrics: LLM返回${llmLines.length}行，与对话数${entries.length}不符，将用兜底文案补齐/截断`
+      );
+    }
+
+    const lines = reconcileLines(llmLines, entries);
+    const { lyrics, lineMap } = assembleLyrics({ entries, lines, genderInfo });
 
     await tasksCol.doc(taskId).update({
       data: {
         lyrics,
         lyricsLineMap: lineMap,
+        'style.musicGenre': genre,
+        'style.vocalMode': genderInfo.vocalMode,
         status: 'generating_music',
         progress: 55,
+        errorStage: '',
+        errorMsg: '',
         updatedAt: Date.now(),
       },
     });
 
-    cloud.callFunction({ name: 'generateMusic', data: { taskId } }).catch((e) => {
-      console.error('trigger generateMusic failed', e);
-    });
+    // 注意：不再通过 cloud.callFunction 触发 generateMusic。
+    // 原因：云函数间调用存在一条独立于被调函数自身 Timeout 配置的约 3 秒调用通道限制，
+    // generateMusic 内部要提交请求到 Suno 音乐生成 API（外部网络调用），耗时一旦超过
+    // 这条通道限制就会被平台强杀，导致任务卡在 generating_music、musicProviderTaskId 始终为空。
+    // 现改为由小程序端 task-progress 轮询页检测到该状态后直接客户端调用 generateMusic。
 
-    return { success: true, data: { taskId, lyrics, lineMap } };
+    return { success: true, data: { taskId, lyrics, lineMap, llmFailed: !!lastError } };
   } catch (e) {
     console.error('generateLyrics error', e);
     await tasksCol.doc(taskId).update({

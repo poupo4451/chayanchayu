@@ -5,15 +5,21 @@ import { bundle } from '@remotion/bundler';
 import { selectComposition, renderMedia } from '@remotion/renderer';
 import * as tcb from '@cloudbase/node-sdk';
 import { BubbleData } from './remotion/ChatBubble';
+import { computeBubbleTimings, LineMapEntry, LyricLine, LyricWord } from './lyricsAlign';
 
-const ENV_ID = process.env.TCB_ENV_ID || 'chayanchayu-d4g0fpnxq738c7662';
+// 注意：TCB_ENV_ID 环境变量曾被误配置为旧环境 ID（chayan-d1gwl5uub1e0e9d0b），
+// 导致 doc().get() 读不到任务数据。此处强制使用正确环境 ID，忽略错误的环境变量。
+const ENV_ID = 'cloud1-d7ggdqfhgc4ee2796';
 const BROWSER_EXECUTABLE = process.env.REMOTION_BROWSER_EXECUTABLE || undefined;
 
 // 云托管环境的 @cloudbase/node-sdk 调用云数据库需要显式传入腾讯云 API 凭证
 // （云函数会自动注入，云托管不会）。凭证通过环境变量配置，避免硬编码。
-const tcbInitConfig: { env: string; secretId?: string; secretKey?: string } = {
+const tcbInitConfig: { env: string; secretId?: string; secretKey?: string; accessKey?: string } = {
   env: ENV_ID,
 };
+if (process.env.CLOUDBASE_APIKEY) {
+  tcbInitConfig.accessKey = process.env.CLOUDBASE_APIKEY;
+}
 if (process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY) {
   tcbInitConfig.secretId = process.env.TENCENTCLOUD_SECRETID;
   tcbInitConfig.secretKey = process.env.TENCENTCLOUD_SECRETKEY;
@@ -28,17 +34,6 @@ const AUDIO_PATH = '/tmp/chat-mv-audio.mp3';
 
 let cachedBundleLocation: string | null = null;
 
-interface LyricLine {
-  lineIndex: number;
-  text: string;
-  startS: number;
-  endS: number;
-}
-interface LineMapEntry {
-  lineIndex: number;
-  dialogueIndex: number;
-}
-
 interface TaskData {
   screenshots: BubbleData[];
   audioUrl: string;
@@ -48,9 +43,11 @@ interface TaskData {
   lyrics: string;
   lyricsLineMap: LineMapEntry[];
   lyricsTimeline: LyricLine[];
+  /** 词级时间戳（Suno alignedWords 精简版），供字级对齐主策略使用 */
+  lyricsWords?: LyricWord[];
   userId: string;
   topic: string;
-  style: { dialogueTone: string; musicGenre: string };
+  style: { dialogueTone: string; musicGenre: string; vocalMode?: string };
 }
 
 async function getBundleLocation(): Promise<string> {
@@ -107,6 +104,30 @@ async function resolveStickerUrls(bubbles: BubbleData[]): Promise<void> {
   }
 }
 
+const AVATAR_PUBLIC_DIR = path.resolve(process.cwd(), 'public', 'avatars');
+
+/**
+ * 检查每个气泡的 avatarId 对应的头像素材是否真的存在于本服务的 public/avatars 目录。
+ * 由于头像图片走本地静态资源（不经网络传输），如果用户还没把对应的
+ * male-*.png / female-*.png 放进 cloud-run-remotion/public/avatars/，
+ * 这里会主动清空 avatarId，让 Avatar 组件回退到首字母色块，避免 Remotion 渲染时
+ * 因为静态资源 404 而报错/卡住。
+ */
+function resolveAvatars(bubbles: BubbleData[]): void {
+  const existsCache = new Map<string, boolean>();
+  for (const b of bubbles) {
+    if (!b.avatarId) continue;
+    let exists = existsCache.get(b.avatarId);
+    if (exists === undefined) {
+      exists = fs.existsSync(path.join(AVATAR_PUBLIC_DIR, `${b.avatarId}.png`));
+      existsCache.set(b.avatarId, exists);
+    }
+    if (!exists) {
+      b.avatarId = undefined;
+    }
+  }
+}
+
 async function uploadVideo(filePath: string, taskId: string): Promise<string> {
   const fileContent = fs.readFileSync(filePath);
   const result = await app.uploadFile({
@@ -130,63 +151,6 @@ async function setStage(taskId: string, stage: string, progress?: number): Promi
 }
 
 const RENDER_FPS = 30;
-
-/**
- * 用歌词行级时间戳(lyricsTimeline) + 歌词行→对话映射(lyricsLineMap)
- * 计算每个对话气泡应该出现的帧号。
- *
- * 映射链：dialogueIndex → lineMap 里所有该对话的歌词行 → 取最早 startS → ×fps 得 startFrame
- *
- * 降级：
- * - 无 timeline/lineMap 或映射为空 → 全部均匀分配
- * - 部分气泡无映射 → 用前一个已对齐气泡的时间
- */
-function computeBubbleStartFrames(
-  bubbles: BubbleData[],
-  lineMap: LineMapEntry[] | undefined,
-  timeline: LyricLine[] | undefined,
-  totalFrames: number,
-): BubbleData[] {
-  const hasTimeline = Array.isArray(timeline) && timeline.length > 0;
-  const hasMap = Array.isArray(lineMap) && lineMap.length > 0;
-
-  // 完全没有对齐数据：均匀分配（含 time 分隔条一起均分，保持相对顺序）
-  if (!hasTimeline || !hasMap) {
-    const n = bubbles.length;
-    const per = Math.floor(totalFrames / Math.max(n, 1));
-    return bubbles.map((b, i) => ({ ...b, startFrame: Math.min(i * per, totalFrames - 1) }));
-  }
-
-  // 歌词行号 → 开始秒
-  const lineToStart = new Map<number, number>();
-  for (const t of timeline as LyricLine[]) {
-    if (!lineToStart.has(t.lineIndex)) lineToStart.set(t.lineIndex, t.startS);
-  }
-
-  // 对话idx → 该对话所有歌词行里最早的开始秒
-  const dialogueStart = new Map<number, number>();
-  for (const m of lineMap as LineMapEntry[]) {
-    if (m.dialogueIndex < 0) continue;
-    const s = lineToStart.get(m.lineIndex);
-    if (s == null) continue;
-    const cur = dialogueStart.get(m.dialogueIndex);
-    if (cur == null || s < cur) dialogueStart.set(m.dialogueIndex, s);
-  }
-
-  // 给每个气泡赋 startFrame；未映射到的用前一个的时间
-  let lastFrame = 0;
-  return bubbles.map((b) => {
-    const s = dialogueStart.get(b.index);
-    let frame: number;
-    if (s != null) {
-      frame = Math.max(0, Math.min(Math.round(s * RENDER_FPS), totalFrames - 1));
-      lastFrame = frame;
-    } else {
-      frame = lastFrame;
-    }
-    return { ...b, startFrame: frame };
-  });
-}
 
 export async function debugRenderSteps(taskId: string): Promise<Record<string, unknown>> {
   const steps: Record<string, unknown> = {};
@@ -301,16 +265,25 @@ export async function renderTask(taskId: string): Promise<void> {
     }
 
     await resolveStickerUrls(bubbles);
+    resolveAvatars(bubbles);
     await setStage(taskId, 'stickers_resolved');
 
-    // 用歌词时间戳对齐气泡出现时间（无时间戳则降级均匀分配）
+    // 用歌词时间戳对齐气泡出现时间。
+    // 注意 lyricsLineMap.lineIndex（歌词文本行号，含 [Verse]/空行）与
+    // lyricsTimeline.lineIndex（实际演唱行序号）不是同一套坐标系，
+    // 必须经 lyricsAlign 做文本模糊对齐，否则气泡会整体错位若干句。
     const totalFrames = Math.ceil(audioDuration * RENDER_FPS);
-    const bubblesTimed = computeBubbleStartFrames(
+    const timed = computeBubbleTimings({
       bubbles,
-      task.lyricsLineMap,
-      task.lyricsTimeline,
+      lineMap: task.lyricsLineMap,
+      timeline: task.lyricsTimeline,
+      lyrics: task.lyrics,
+      lyricsWords: task.lyricsWords,
       totalFrames,
-    );
+      fps: RENDER_FPS,
+    });
+    const bubblesTimed = timed.bubbles;
+    console.log('lyrics alignment:', JSON.stringify(timed.report));
 
     // Remotion 的 <Audio> 组件支持直接使用可访问的 http(s) URL，
     // 渲染器会下载并混入音轨。之前把音频下载到容器 /tmp 后传入本地绝对路径，
@@ -335,6 +308,10 @@ export async function renderTask(taskId: string): Promise<void> {
       bubbles: bubblesTimed,
       audioPath: audioPath || '',
       audioDuration,
+      // 每句歌词的起唱帧，供画面做节奏律动
+      beats: timed.beats,
+      // 流派用于挑选气泡入场动画池（嘻哈更 punchy，抒情类更柔和）
+      genre: (task.style && task.style.musicGenre) || '',
     };
 
     const composition = await selectComposition({

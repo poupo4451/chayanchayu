@@ -1,4 +1,4 @@
-const { getTaskDetail, regenerateDialogue, confirmDialogue } = require('../../utils/api');
+const { getTaskDetail, startDialogue, regenerateDialogue, confirmDialogue } = require('../../utils/api');
 
 Page({
   data: {
@@ -11,6 +11,7 @@ Page({
     this.setData({ taskId: query.taskId });
     this.pollCount = 0;
     this.pollTimer = null;
+    this.dialogueTriggered = false;
     this.loadDialogue();
   },
 
@@ -33,6 +34,22 @@ Page({
         wx.showToast({ title: task.errorMsg || '生成失败，请点重新生成', icon: 'none' });
         this.stopPolling();
         return;
+      }
+
+      // 任务刚创建、尚未开始生成对话：由客户端直接触发生成
+      // （不走云函数间调用，避免该链路约3秒的调用通道限制导致任务卡死在10%）
+      if (task.status === 'pending' && !this.dialogueTriggered) {
+        this.dialogueTriggered = true;
+        startDialogue(this.data.taskId)
+          .then((res) => {
+            if (res && res.dialogue && res.dialogue.length > 0) {
+              this.setData({ dialogue: res.dialogue, loading: false });
+              this.stopPolling();
+            }
+          })
+          .catch((e) => {
+            console.error('startDialogue failed', e);
+          });
       }
 
       // 仍在生成中（pending / generating_dialogue），继续轮询，最多约 60 秒

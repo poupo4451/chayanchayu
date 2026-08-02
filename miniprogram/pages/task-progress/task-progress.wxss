@@ -44,6 +44,15 @@
   color: var(--text-sub);
 }
 
+.stage-hint {
+  margin-top: 24rpx;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-sub);
+  text-align: center;
+  padding: 0 20rpx;
+}
+
 .error-msg {
   margin-top: 20rpx;
   color: var(--danger);

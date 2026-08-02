@@ -15,9 +15,13 @@ const db = cloud.database();
 // 云托管 Remotion 服务的公网域名（从云托管控制台获取）
 const REMOTION_SERVICE_URL =
   process.env.REMOTION_SERVICE_URL ||
-  'https://chat-mv-remotion-288614-10-1459907343.sh.run.tcloudbase.com';
+  'https://chat-mv-remotion-290149-5-1461115587.sh.run.tcloudbase.com';
 
 function postToRenderService(taskId) {
+  if (!REMOTION_SERVICE_URL) {
+    return Promise.reject(new Error('缺少 REMOTION_SERVICE_URL 环境变量配置'));
+  }
+
   return new Promise((resolve, reject) => {
     const url = new URL('/render', REMOTION_SERVICE_URL);
     const data = JSON.stringify({ taskId });
@@ -30,7 +34,7 @@ function postToRenderService(taskId) {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(data),
         },
-        timeout: 30000,
+        timeout: 90000,
       },
       (res) => {
         let body = '';
