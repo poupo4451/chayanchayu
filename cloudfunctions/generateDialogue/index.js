@@ -7,6 +7,7 @@ const cloud = require('wx-server-sdk');
 const tcb = require('@cloudbase/node-sdk');
 const { STICKER_IDS } = require('./stickers');
 const { assignAvatars } = require('./avatarAssign');
+const { assignStickerUrls } = require('./stickerAssign');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const app = tcb.init({ env: cloud.DYNAMIC_CURRENT_ENV, timeout: 55000 });
@@ -42,7 +43,9 @@ function buildPrompt({ topic, tone }) {
 
 要求：
 1. 严格输出 JSON 数组，不要输出任何多余文字、markdown代码块标记或解释
-2. 数组包含 12~30 轮对话，交替出现 left/right 两个角色；具体轮数由剧情节奏和信息量自然决定——情节简单就少一点（12~18轮左右），情节有起承转合、需要铺垫反转就多一点（可以到25~30轮），但不要为了凑数而注水、重复啰嗦或硬拉长
+2. 数组包含 12~30 轮对话；具体轮数由剧情节奏和信息量自然决定——情节简单就少一点（12~18轮左右），情节有起承转合、需要铺垫反转就多一点（可以到25~30轮），但不要为了凑数而注水、重复啰嗦或硬拉长
+   - 【重要】不要严格交替发言！真实聊天中一个人经常连续发2~3条消息（比如连续吐槽、追问、补充），让对话有自然的"连发感"，偶尔出现同一角色连续2条再切回对方
+   - 整体 left 和 right 的比例大致在 4:6 到 6:4 之间即可，不必精确相等，更不必严格交替
 3. 每个元素默认格式：{"role":"left"或"right","name":"角色昵称","type":"text","text":"对话内容"}
 4. 角色昵称要符合主题人设（2~4个字），对话内容口语化、有反转或包袱，单条不超过40字，可适当使用emoji调味
 5. 【特殊消息类型】除了默认的 "text"，你还可以使用以下类型让对话更生动，但整段对话中【非text类型总共最多出现2~4条，且不能是第一条或最后一条】：
@@ -197,6 +200,8 @@ exports.main = async (event) => {
 
     // 为每个说话人稳定分配默认头像标识（如 male-2），全程保持一致
     dialogue = assignAvatars(dialogue);
+    // 把 LLM 输出的 stickerId 翻译成 imageUrl，避免前端因读不到图片而出现"空气泡"
+    dialogue = assignStickerUrls(dialogue);
 
     await tasksCol.doc(taskId).update({
       data: {

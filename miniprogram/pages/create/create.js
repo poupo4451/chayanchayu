@@ -35,9 +35,8 @@ Page({
       });
       wx.navigateTo({ url: `/pages/dialogue-preview/dialogue-preview?taskId=${taskId}` });
     } catch (e) {
-      const message = (e && e.message) || '创建任务失败';
-      wx.showToast({ title: message.slice(0, 20), icon: 'none' });
-      console.error(e);
+      const { showError } = require('../../utils/error-tip');
+      showError(e, '创建任务失败');
     } finally {
       this.setData({ submitting: false });
     }

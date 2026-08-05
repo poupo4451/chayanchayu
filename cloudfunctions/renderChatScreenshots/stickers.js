@@ -4,11 +4,18 @@
  * 本文件用于把 dialogue 中的 stickerId 解析为实际的云存储 fileID
  */
 const STICKER_MAP = {
-  laugh: 'cloud://chayanchayu-d4g0fpnxq738c7662.6368-chayanchayu-d4g0fpnxq738c7662-1459907343/stickers/sticker-01-laugh.png',
-  dog: 'cloud://chayanchayu-d4g0fpnxq738c7662.6368-chayanchayu-d4g0fpnxq738c7662-1459907343/stickers/sticker-02-dog.png',
-  shock: 'cloud://chayanchayu-d4g0fpnxq738c7662.6368-chayanchayu-d4g0fpnxq738c7662-1459907343/stickers/sticker-03-shock.png',
-  skull: 'cloud://chayanchayu-d4g0fpnxq738c7662.6368-chayanchayu-d4g0fpnxq738c7662-1459907343/stickers/sticker-04-skull.png',
-  thumbsup: 'cloud://chayanchayu-d4g0fpnxq738c7662.6368-chayanchayu-d4g0fpnxq738c7662-1459907343/stickers/sticker-05-thumbsup.png',
+  laugh: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-01-laugh.png',
+  dog: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-02-dog.png',
+  shock: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-03-shock.png',
+  skull: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-04-skull.png',
+  thumbsup: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-05-thumbsup.png',
+  smirk: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-06-smirk.png',
+  confused: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-07-confused.png',
+  watching: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-08-watching.png',
+  weepy: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-09-weepy.png',
+  tired: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-10-tired.png',
+  thanks: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-11-thanks.png',
+  bossy: 'cloud://cloud1-d7ggdqfhgc4ee2796.636c-cloud1-d7ggdqfhgc4ee2796-1462201626/stickers/sticker-12-bossy.png',
 };
 
 function getStickerUrl(stickerId) {

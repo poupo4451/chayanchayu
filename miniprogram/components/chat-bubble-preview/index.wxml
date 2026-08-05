@@ -1,71 +1,70 @@
+<!-- 时间分隔药丸 -->
 <view wx:if="{{line.type === 'time'}}" class="time-divider">
   <text>{{line.text}}</text>
 </view>
 
+<!-- 表情包 / 图片 -->
 <view
   wx:elif="{{line.type === 'image'}}"
-  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
+  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : ''}}"
   bindtap="onTap"
 >
-  <view class="avatar avatar-{{line.role || 'left'}}">
+  <view class="avatar">
     <image wx:if="{{avatarSrc && !avatarError}}" class="avatar-img" src="{{avatarSrc}}" mode="aspectFill" binderror="onAvatarError" />
     <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
   </view>
-  <image class="bubble-sticker" src="{{line.params.imageUrl}}" mode="aspectFit" />
+  <image wx:if="{{stickerSrc}}" class="bubble-image" src="{{stickerSrc}}" mode="aspectFill" binderror="onStickerError" />
+  <view wx:else class="bubble-image bubble-image-fallback">
+    <text>表情包</text>
+  </view>
 </view>
 
+<!-- 红包 -->
 <view
   wx:elif="{{line.type === 'redpacket'}}"
-  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
+  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : ''}}"
   bindtap="onTap"
 >
-  <view class="avatar avatar-{{line.role || 'left'}}">
+  <view class="avatar">
     <image wx:if="{{avatarSrc && !avatarError}}" class="avatar-img" src="{{avatarSrc}}" mode="aspectFill" binderror="onAvatarError" />
     <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
   </view>
-  <view class="bubble bubble-redpacket">
-    <view class="redpacket-top">
-      <view class="redpacket-icon">🧧</view>
-      <text class="redpacket-text">{{line.text || '恭喜发财'}}</text>
-    </view>
-    <view class="redpacket-divider"></view>
-    <text class="redpacket-bottom">微信红包</text>
+  <view class="content-col {{line.role === 'right' ? 'content-col-right' : ''}}">
+    <image class="pay-card-img" src="/images/redpacket-{{line.role || 'left'}}.svg" mode="widthFix" />
   </view>
 </view>
 
+<!-- 转账 -->
 <view
   wx:elif="{{line.type === 'transfer'}}"
-  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
+  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : ''}}"
   bindtap="onTap"
 >
-  <view class="avatar avatar-{{line.role || 'left'}}">
+  <view class="avatar">
     <image wx:if="{{avatarSrc && !avatarError}}" class="avatar-img" src="{{avatarSrc}}" mode="aspectFill" binderror="onAvatarError" />
     <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
   </view>
-  <view class="bubble bubble-transfer">
-    <view class="transfer-top">
-      <view class="transfer-icon">￥</view>
-      <view class="transfer-info">
-        <text class="transfer-amount">￥{{line.params.amount}}</text>
-        <text class="transfer-remark">{{line.text || '转账'}}</text>
-      </view>
-    </view>
-    <view class="transfer-divider"></view>
-    <text class="transfer-bottom">微信转账</text>
+  <view class="content-col {{line.role === 'right' ? 'content-col-right' : ''}}">
+    <image class="pay-card-img" src="/images/transfer-{{line.role || 'left'}}.svg" mode="widthFix" />
   </view>
 </view>
 
+<!-- 文字（默认）：名称在气泡外 + 尖角 -->
 <view
   wx:else
-  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : 'bubble-row-left'}}"
+  class="bubble-row {{line.role === 'right' ? 'bubble-row-right' : ''}}"
   bindtap="onTap"
 >
-  <view class="avatar avatar-{{line.role || 'left'}}">
+  <view class="avatar">
     <image wx:if="{{avatarSrc && !avatarError}}" class="avatar-img" src="{{avatarSrc}}" mode="aspectFill" binderror="onAvatarError" />
     <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
   </view>
-  <view class="bubble bubble-{{line.role || 'left'}}">
-    <text class="bubble-name">{{line.name}}</text>
-    <text class="bubble-text">{{line.text}}</text>
+  <view class="content-col {{line.role === 'right' ? 'content-col-right' : ''}}">
+    <view class="bubble-container">
+      <view class="bubble bubble-{{line.role || 'left'}}">
+        <view class="bubble-tail bubble-tail-{{line.role || 'left'}}"></view>
+        <text class="bubble-text">{{line.text}}</text>
+      </view>
+    </view>
   </view>
 </view>

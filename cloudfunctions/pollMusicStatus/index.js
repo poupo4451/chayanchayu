@@ -34,7 +34,7 @@ const MUSIC_CALLBACK_BASE_URL = process.env.MUSIC_CALLBACK_BASE_URL;
 // 云托管 Remotion 渲染服务地址
 const REMOTION_SERVICE_URL =
   process.env.REMOTION_SERVICE_URL ||
-  'https://chat-mv-remotion-290686-7-1462201626.sh.run.tcloudbase.com';
+  'https://chat-mv-remotion-288614-10-1459907343.sh.run.tcloudbase.com';
 
 // ---------------------------------------------------------------------------
 // 音乐风格模板（与 generateMusic/musicStyleDict 保持一致）

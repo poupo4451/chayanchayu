@@ -7,8 +7,7 @@ import * as tcb from '@cloudbase/node-sdk';
 import { BubbleData } from './remotion/ChatBubble';
 import { computeBubbleTimings, LineMapEntry, LyricLine, LyricWord } from './lyricsAlign';
 
-// 注意：TCB_ENV_ID 环境变量曾被误配置为旧环境 ID（chayan-d1gwl5uub1e0e9d0b），
-// 导致 doc().get() 读不到任务数据。此处强制使用正确环境 ID，忽略错误的环境变量。
+// 渲染服务必须与小程序、云函数和 Cloud Run 部署目标使用同一个环境。
 const ENV_ID = 'cloud1-d7ggdqfhgc4ee2796';
 const BROWSER_EXECUTABLE = process.env.REMOTION_BROWSER_EXECUTABLE || undefined;
 

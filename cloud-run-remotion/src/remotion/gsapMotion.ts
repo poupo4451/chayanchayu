@@ -1,4 +1,33 @@
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from './wxTheme';
+import {
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+  // 动画变体池
+  VARIANT_CYCLE,
+  GENRE_VARIANT_POOLS,
+  HERO_VARIANT_POOL,
+  type EnterVariant,
+  // 时序参数
+  ENTER_FRAMES,
+  EXIT_FRAMES,
+  // 能量映射
+  ENERGY_MAP,
+  FADE_SPEED,
+  // 变体数值参数
+  VARIANT_PARAMS,
+  HERO_VARIANT_PARAMS,
+  // 退出参数
+  EXIT_PARAMS,
+  HERO_EXIT_PARAMS,
+  FLASH_EXIT_PARAMS,
+  // 节拍衰减
+  BEAT_DECAY,
+} from './animation-config';
+
+// ─────────────────────────────────────────────────────────────────
+// 重新导出类型和池，向后兼容
+// ─────────────────────────────────────────────────────────────────
+export type { EnterVariant };
+export { VARIANT_CYCLE, GENRE_VARIANT_POOLS, HERO_VARIANT_POOL };
 
 /**
  * GSAP 风格动效引擎（纯函数，无运行时依赖）
@@ -13,6 +42,8 @@ import { CANVAS_WIDTH, CANVAS_HEIGHT } from './wxTheme';
  * 提供两层：
  *   1. Ease   —— 缓动曲线（power / back / elastic / expo / circ / bounce）
  *   2. ENTER_VARIANTS —— 用这些曲线组合出的气泡入场动画预设
+ *
+ * 所有动画参数从 animation-config.ts 统一读取，通过 dev-preview 可实时调参。
  */
 
 export type EaseFn = (t: number) => number;
@@ -42,7 +73,7 @@ export const Ease = {
 
   circOut: (t: number) => Math.sqrt(1 - Math.pow(clamp01(t) - 1, 2)),
 
-  /** back.out(overshoot) —— 冲过头再回弹，GSAP 默认 overshoot = 1.70158 */
+  /** back.out(overshoot) —— 冲过头再回弹 */
   backOut:
     (overshoot = 1.70158): EaseFn =>
     (t: number) => {
@@ -88,51 +119,7 @@ export interface MotionState {
   clipPath?: string;
 }
 
-/** 入场变体名。side 决定水平方向（对方气泡从左、自己气泡从右）。 */
-export type EnterVariant =
-  | 'pop'
-  | 'slide'
-  | 'flip'
-  | 'blurUp'
-  | 'elastic'
-  | 'swing'
-  | 'zoomIn'
-  | 'typewriter'
-  | 'shake'
-  | 'shine'
-  // ── Hero 独占时刻专用（更猛更炸）──
-  | 'flyIn'
-  | 'tumble3d'
-  | 'warp'
-  | 'flash';
-
-/** 按气泡序号轮换动画，同一组内相邻两条不会重样（默认池，未指定流派时使用） */
-export const VARIANT_CYCLE: EnterVariant[] = [
-  'pop',
-  'slide',
-  'elastic',
-  'blurUp',
-  'flip',
-  'zoomIn',
-  'swing',
-  'typewriter',
-  'shake',
-  'shine',
-];
-
-/**
- * 按音乐流派分组的动画池：嘻哈/抖音风偏"抓耳"的强调型效果（震动/弹跳/打字机），
- * R&B/流行偏柔和的滑入/模糊/弹性效果，粤语说唱介于两者之间。
- */
-export const GENRE_VARIANT_POOLS: Record<string, EnterVariant[]> = {
-  嘻哈: ['pop', 'shake', 'zoomIn', 'typewriter', 'swing', 'shine'],
-  抖音风: ['shake', 'pop', 'shine', 'zoomIn', 'typewriter', 'flip'],
-  粤语说唱: ['pop', 'shake', 'slide', 'swing', 'zoomIn'],
-  流行: ['slide', 'blurUp', 'zoomIn', 'shine', 'elastic', 'swing'],
-  'R&B': ['blurUp', 'slide', 'elastic', 'flip', 'zoomIn'],
-  随机: VARIANT_CYCLE,
-};
-
+/** 按气泡序号轮换动画，同一组内相邻两条不会重样 */
 export function pickVariant(seed: number): EnterVariant {
   const i = ((seed % VARIANT_CYCLE.length) + VARIANT_CYCLE.length) % VARIANT_CYCLE.length;
   return VARIANT_CYCLE[i];
@@ -145,20 +132,21 @@ export function pickVariantForGenre(seed: number, genre?: string): EnterVariant 
   return pool[i];
 }
 
-/**
- * Hero 独占时刻专用动画池：flyIn/tumble3d/warp/flash，
- * 比普通池更夸张，专用于「单条气泡炸屏」的高光时刻。
- */
-export const HERO_VARIANT_POOL: EnterVariant[] = ['flyIn', 'tumble3d', 'warp', 'flash'];
-
+/** Hero 独占时刻专用动画池 */
 export function pickHeroVariant(seed: number): EnterVariant {
-  const i = ((seed % HERO_VARIANT_POOL.length) + HERO_VARIANT_POOL.length) % HERO_VARIANT_POOL.length;
+  const i =
+    ((seed % HERO_VARIANT_POOL.length) + HERO_VARIANT_POOL.length) % HERO_VARIANT_POOL.length;
   return HERO_VARIANT_POOL[i];
 }
 
-const backSoft = Ease.backOut(1.7);
-const backHard = Ease.backOut(2.6);
-const elastic = Ease.elasticOut(1, 0.42);
+// ── 缓动函数实例（从配置读取参数） ────────────────────────────────────
+
+const backSoft = Ease.backOut(VARIANT_PARAMS.flip.backOvershoot);
+const backHard = Ease.backOut(VARIANT_PARAMS.swing.backOvershoot);
+const elastic = Ease.elasticOut(
+  VARIANT_PARAMS.elastic.elasticAmplitude,
+  VARIANT_PARAMS.elastic.elasticPeriod,
+);
 
 /**
  * 计算入场瞬时状态。
@@ -176,23 +164,20 @@ export function enterMotion(
   const t = clamp01(raw);
   const dir = side === 'right' ? 1 : -1;
   const origin = side === 'right' ? 'right top' : 'left top';
-  const amp = 0.75 + energy * 0.5; // 节奏越强，幅度越大
-  // 透明度总是比位移先收敛，避免"淡入拖尾"
-  const fade = Ease.power2Out(Math.min(t * 1.45, 1));
+  const amp = ENERGY_MAP.offset + energy * ENERGY_MAP.k;
+  const fade = Ease.power2Out(Math.min(t * FADE_SPEED, 1));
 
   switch (variant) {
     case 'pop': {
-      // gsap.from({scale: .3, ease: 'back.out(2.6)'})
       const p = backHard(t);
-      const scale = lerp(0.3, 1, p);
+      const scale = lerp(VARIANT_PARAMS.pop.scaleFrom, 1, p);
       return { opacity: fade, transform: `scale(${scale.toFixed(4)})`, transformOrigin: origin };
     }
 
     case 'slide': {
-      // gsap.from({x: ±160, ease: 'expo.out'})
       const p = Ease.expoOut(t);
-      const x = lerp(dir * 160 * amp, 0, p);
-      const scale = lerp(0.94, 1, backSoft(t));
+      const x = lerp(dir * VARIANT_PARAMS.slide.distanceX * amp, 0, p);
+      const scale = lerp(VARIANT_PARAMS.slide.scaleFrom, 1, backSoft(t));
       return {
         opacity: fade,
         transform: `translate3d(${x.toFixed(2)}px,0,0) scale(${scale.toFixed(4)})`,
@@ -201,10 +186,9 @@ export function enterMotion(
     }
 
     case 'flip': {
-      // gsap.from({rotationY: ±72, ease: 'back.out(1.7)'})
       const p = backSoft(t);
-      const ry = lerp(dir * -72 * amp, 0, p);
-      const scale = lerp(0.9, 1, p);
+      const ry = lerp(dir * -VARIANT_PARAMS.flip.rotateY * amp, 0, p);
+      const scale = lerp(VARIANT_PARAMS.flip.scaleFrom, 1, p);
       return {
         opacity: fade,
         transform: `perspective(1400px) rotateY(${ry.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
@@ -213,10 +197,9 @@ export function enterMotion(
     }
 
     case 'blurUp': {
-      // gsap.from({y: 70, filter: 'blur(14px)', ease: 'power3.out'})
       const p = Ease.power3Out(t);
-      const y = lerp(70 * amp, 0, p);
-      const blur = lerp(14, 0, Ease.power2Out(Math.min(t * 1.6, 1)));
+      const y = lerp(VARIANT_PARAMS.blurUp.distanceY * amp, 0, p);
+      const blur = lerp(VARIANT_PARAMS.blurUp.blurMax, 0, Ease.power2Out(Math.min(t * VARIANT_PARAMS.blurUp.blurSpeed, 1)));
       return {
         opacity: fade,
         transform: `translate3d(0,${y.toFixed(2)}px,0)`,
@@ -226,10 +209,11 @@ export function enterMotion(
     }
 
     case 'elastic': {
-      // gsap.from({y: -90, ease: 'elastic.out(1, .42)'})
-      const p = elastic(t);
-      const y = lerp(-90 * amp, 0, p);
-      const scaleY = lerp(0.82, 1, Ease.power2Out(Math.min(t * 2, 1)));
+      const rawP = elastic(t);
+      // 压缩过冲：elasticOut 峰值约 1.12，超过 1 的部分压到 10%
+      const p = rawP > 1 ? 1 + (rawP - 1) * 0.1 : rawP;
+      const y = lerp(VARIANT_PARAMS.elastic.distanceY * amp, 0, p);
+      const scaleY = lerp(VARIANT_PARAMS.elastic.scaleYFrom, 1, Ease.power2Out(Math.min(t * VARIANT_PARAMS.elastic.scaleSpeed, 1)));
       return {
         opacity: fade,
         transform: `translate3d(0,${y.toFixed(2)}px,0) scaleY(${scaleY.toFixed(4)})`,
@@ -238,10 +222,9 @@ export function enterMotion(
     }
 
     case 'swing': {
-      // gsap.from({rotation: ∓14, scale: .8, ease: 'back.out(2.6)'})
       const p = backHard(t);
-      const rot = lerp(dir * -14 * amp, 0, p);
-      const scale = lerp(0.8, 1, p);
+      const rot = lerp(dir * -VARIANT_PARAMS.swing.rotateDeg * amp, 0, p);
+      const scale = lerp(VARIANT_PARAMS.swing.scaleFrom, 1, p);
       return {
         opacity: fade,
         transform: `rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
@@ -262,10 +245,11 @@ export function enterMotion(
     }
 
     case 'shake': {
-      // 冲进来 + 几次衰减的左右震动，剪映风格的"强调"效果
+      // 冲进来 + 几次快速衰减的左右震动，平方衰减让后段尽快收敛
       const p = backHard(t);
-      const scale = lerp(0.4, 1, p);
-      const wiggle = Math.sin(t * Math.PI * 6) * (1 - t) * 9 * amp;
+      const scale = lerp(VARIANT_PARAMS.shake.scaleFrom, 1, p);
+      const decay = (1 - t) * (1 - t);
+      const wiggle = Math.sin(t * Math.PI * VARIANT_PARAMS.shake.oscillationPeriods) * decay * VARIANT_PARAMS.shake.wiggleAmplitude * amp;
       return {
         opacity: fade,
         transform: `scale(${scale.toFixed(4)}) rotate(${wiggle.toFixed(2)}deg)`,
@@ -274,26 +258,98 @@ export function enterMotion(
     }
 
     case 'shine': {
-      // 入场瞬间来一道"扫光"高光闪烁 + 轻微缩放，强调新气泡刚刚出现
+      // 入场瞬间扫光闪烁 + 轻微缩放
       const p = Ease.power2Out(t);
-      const scale = lerp(0.88, 1, p);
+      const scale = lerp(VARIANT_PARAMS.shine.scaleFrom, 1, p);
       const flash = Math.sin(Math.min(t, 1) * Math.PI);
-      const brightness = 1 + flash * 0.55;
-      const saturate = 1 + flash * 0.25;
+      const glow = flash * VARIANT_PARAMS.shine.glowMax;
       return {
         opacity: fade,
         transform: `scale(${scale.toFixed(4)})`,
-        filter: `brightness(${brightness.toFixed(3)}) saturate(${saturate.toFixed(3)})`,
+        filter: glow > 0.5 ? `drop-shadow(0 0 ${glow.toFixed(1)}px rgba(255,255,255,0.55))` : undefined,
         transformOrigin: origin,
       };
     }
 
     case 'zoomIn':
     default: {
-      // gsap.from({scale: 1.35, ease: 'circ.out'}) —— 从外向内压进来
+      // gsap.from({scale: 1.32, ease: 'circ.out'}) —— 从外向内压进来
       const p = Ease.circOut(t);
-      const scale = lerp(1.32, 1, p);
+      const scale = lerp(VARIANT_PARAMS.zoomIn.scaleFrom, 1, p);
       return { opacity: fade, transform: `scale(${scale.toFixed(4)})`, transformOrigin: origin };
+    }
+
+    // ═══════ 方向多样化新变体 ═══════════════════════════════════════════
+
+    case 'slideUp': {
+      // 从屏幕下方滑入，带初始模糊
+      const p = Ease.power3Out(t);
+      const y = lerp(VARIANT_PARAMS.slideUp.distanceY * amp, 0, p);
+      const blur = lerp(VARIANT_PARAMS.slideUp.blurMax, 0, Ease.power2Out(Math.min(t * 1.8, 1)));
+      return {
+        opacity: fade,
+        transform: `translate3d(0,${y.toFixed(2)}px,0)`,
+        filter: blur > 0.3 ? `blur(${blur.toFixed(2)}px)` : undefined,
+        transformOrigin: 'center center',
+      };
+    }
+
+    case 'bounce': {
+      // 从上方弹跳下落，bounceOut 缓动模拟落地弹跳
+      const p = Ease.bounceOut(t);
+      const y = lerp(VARIANT_PARAMS.bounce.distanceY * amp, 0, p);
+      const scale = lerp(VARIANT_PARAMS.bounce.scaleFrom, 1, Ease.power2Out(t));
+      return {
+        opacity: fade,
+        transform: `translate3d(0,${y.toFixed(2)}px,0) scale(${scale.toFixed(4)})`,
+        transformOrigin: 'center center',
+      };
+    }
+
+    case 'zoomOut': {
+      // 后→前：从极小（远）缩放到正常，perspective 增加深度感
+      const p = Ease.expoOut(t);
+      const scale = lerp(VARIANT_PARAMS.zoomOut.scaleFrom, 1, p);
+      return {
+        opacity: fade,
+        transform: `perspective(${VARIANT_PARAMS.zoomOut.perspective}px) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    case 'punchIn': {
+      // 前→后：从极大（贴脸）压制到正常，expoOut 急停
+      const p = Ease.expoOut(t);
+      const scale = lerp(VARIANT_PARAMS.punchIn.scaleFrom, 1, p);
+      return {
+        opacity: fade,
+        transform: `scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    case 'flipX': {
+      // X 轴三维翻转：顶部翻开落下，backOut 轻微过冲增加弹性
+      const p = backSoft(t);
+      const rx = lerp(-VARIANT_PARAMS.flipX.rotateX * amp, 0, p);
+      const scale = lerp(VARIANT_PARAMS.flipX.scaleFrom, 1, p);
+      return {
+        opacity: fade,
+        transform: `perspective(1400px) rotateX(${rx.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
+        transformOrigin: 'center top',
+      };
+    }
+
+    case 'spinZ': {
+      // Z 轴旋转 > 一圈 + 缩放，power3Out 让旋转先快后慢
+      const p = Ease.power3Out(t);
+      const rot = lerp(VARIANT_PARAMS.spinZ.rotateZ * amp, 0, p);
+      const scale = lerp(VARIANT_PARAMS.spinZ.scaleFrom, 1, backSoft(t));
+      return {
+        opacity: fade,
+        transform: `rotateZ(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
+        transformOrigin: origin,
+      };
     }
 
     // ═══════ Hero 独占时刻专用变体（更猛更炸）══════════════════════════
@@ -301,9 +357,9 @@ export function enterMotion(
     case 'flyIn': {
       // 从屏幕外真实坐标高速甩入，expo.out 急停
       const p = Ease.expoOut(t);
-      const offX = lerp(dir * (CANVAS_WIDTH / 2 + 220), 0, p);
-      const offY = lerp(-CANVAS_HEIGHT / 2 - 220, 0, p);
-      const scale = lerp(1.12, 1, p);
+      const offX = lerp(dir * (CANVAS_WIDTH / 2 + HERO_VARIANT_PARAMS.flyIn.offsetExtraX), 0, p);
+      const offY = lerp(-CANVAS_HEIGHT / 2 - HERO_VARIANT_PARAMS.flyIn.offsetExtraY, 0, p);
+      const scale = lerp(HERO_VARIANT_PARAMS.flyIn.scaleFrom, 1, p);
       return {
         opacity: fade,
         transform: `translate3d(${offX.toFixed(2)}px,${offY.toFixed(2)}px,0) scale(${scale.toFixed(4)})`,
@@ -314,23 +370,23 @@ export function enterMotion(
     case 'tumble3d': {
       // perspective + rotateX/Y/Z 复合旋转，从小到大立体翻滚
       const p = backHard(t);
-      const rx = lerp(-120 * amp, 0, p);
-      const ry = lerp(dir * -90 * amp, 0, p);
-      const rz = lerp(28 * amp, 0, p);
-      const scale = lerp(0.4, 1, p);
+      const rx = lerp(-HERO_VARIANT_PARAMS.tumble3d.rotateX * amp, 0, p);
+      const ry = lerp(dir * -HERO_VARIANT_PARAMS.tumble3d.rotateY * amp, 0, p);
+      const rz = lerp(HERO_VARIANT_PARAMS.tumble3d.rotateZ * amp, 0, p);
+      const scale = lerp(HERO_VARIANT_PARAMS.tumble3d.scaleFrom, 1, p);
       return {
         opacity: fade,
-        transform: `perspective(1200px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) rotateZ(${rz.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
+        transform: `perspective(${HERO_VARIANT_PARAMS.tumble3d.perspective}px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) rotateZ(${rz.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
         transformOrigin: '50% 50%',
       };
     }
 
     case 'warp': {
-      // 入场瞬间 skew 按衰减正弦振荡，幅度随 energy 放大，卡点越强扭曲越猛
+      // 入场瞬间 skew 按衰减正弦振荡
       const p = Ease.expoOut(t);
       const decay = 1 - p;
-      const osc = Math.sin(t * Math.PI * 5) * decay * 24 * amp;
-      const scale = lerp(0.6, 1, p);
+      const osc = Math.sin(t * Math.PI * HERO_VARIANT_PARAMS.warp.oscillationPeriods) * decay * HERO_VARIANT_PARAMS.warp.skewAmplitude * amp;
+      const scale = lerp(HERO_VARIANT_PARAMS.warp.scaleFrom, 1, p);
       return {
         opacity: fade,
         transform: `skew(${osc.toFixed(2)}deg,${(osc * 0.4).toFixed(2)}deg) scale(${scale.toFixed(4)})`,
@@ -339,15 +395,12 @@ export function enterMotion(
     }
 
     case 'flash': {
-      // 极短帧数内白色高光爆闪 + 硬切入位，比 shine 更快更猛
+      // 爆缩放硬切入位
       const p = Ease.expoOut(t);
-      const scale = lerp(1.5, 1, p);
-      const flash = Math.max(0, 1 - t * 4); // 前 1/4 进度内爆闪
-      const brightness = 1 + flash * 1.3;
+      const scale = lerp(HERO_VARIANT_PARAMS.flash.scaleFrom, 1, p);
       return {
         opacity: fade,
         transform: `scale(${scale.toFixed(4)})`,
-        filter: `brightness(${brightness.toFixed(3)})`,
         transformOrigin: origin,
       };
     }
@@ -360,38 +413,37 @@ export function exitMotion(raw: number): MotionState {
   const p = Ease.power2In(t);
   return {
     opacity: 1 - Ease.power1Out(t),
-    transform: `translate3d(0,${(-64 * p).toFixed(2)}px,0) scale(${(1 - 0.07 * p).toFixed(4)})`,
-    filter: t > 0.05 ? `blur(${(8 * p).toFixed(2)}px)` : undefined,
+    transform: `translate3d(0,${(-EXIT_PARAMS.translateY * p).toFixed(2)}px,0) scale(${(1 - EXIT_PARAMS.scaleDecay * p).toFixed(4)})`,
+    filter: t > EXIT_PARAMS.blurThreshold ? `blur(${(EXIT_PARAMS.blurMax * p).toFixed(2)}px)` : undefined,
   };
 }
 
 /**
- * Hero 独占气泡退场：scale 1→1.18→0 的「快闪缩放」+ 全屏白闪感，
- * 与入场的 flash/tumble3d 呼应，制造重拍强调的收束。
- * 峰值原为 1.6，叠加 ChatMVComposition 里的 heroScale(1.18)/呼吸缩放后
- * 极易把气泡冲出 1080px 画布边缘，这里降到 1.18，保留"炸一下"的节奏感但不溢出。
+ * Hero 独占气泡退场：scale 1→peakScale→0 的「快闪缩放」+ 淡出
  */
 export function heroExitMotion(raw: number): MotionState {
   const t = clamp01(raw);
-  const scale = t < 0.4 ? lerp(1, 1.18, t / 0.4) : lerp(1.18, 0, (t - 0.4) / 0.6);
-  const opacity = t < 0.5 ? 1 : 1 - Ease.power2In((t - 0.5) / 0.5);
-  const flash = t < 0.12 ? 1 - t / 0.12 : 0;
+  const peakRatio = HERO_EXIT_PARAMS.peakRatio;
+  const peakScale = HERO_EXIT_PARAMS.peakScale;
+  const halfPoint = HERO_EXIT_PARAMS.fadeHalfPoint;
+  const scale = t < peakRatio ? lerp(1, peakScale, t / peakRatio) : lerp(peakScale, 0, (t - peakRatio) / (1 - peakRatio));
+  const opacity = t < halfPoint ? 1 : 1 - Ease.power2In((t - halfPoint) / (1 - halfPoint));
   return {
     opacity,
     transform: `scale(${scale.toFixed(4)})`,
-    filter: flash > 0 ? `brightness(${(1 + flash * 1.5).toFixed(3)})` : undefined,
   };
 }
 
 /**
- * 组内个体「快闪退场」：scale 冲高再瞬间归零 + 轻微色闪，
- * 替代整组统一的温柔退场，制造剪映风格的「卡点快切」感。
- * t=0 时无影响（opacity:1, scale:1），t=1 时完全消失。
+ * 组内个体「快闪退场」：scale 冲高再瞬间归零，替代整组统一的温柔退场
  */
 export function bubbleFlashExit(raw: number): MotionState {
   const t = clamp01(raw);
-  const scale = t < 0.35 ? lerp(1, 1.18, t / 0.35) : lerp(1.18, 0, (t - 0.35) / 0.65);
-  const opacity = t < 0.4 ? 1 : 1 - Ease.power2In((t - 0.4) / 0.6);
+  const peakRatio = FLASH_EXIT_PARAMS.peakRatio;
+  const peakScale = FLASH_EXIT_PARAMS.peakScale;
+  const halfPoint = FLASH_EXIT_PARAMS.fadeHalfPoint;
+  const scale = t < peakRatio ? lerp(1, peakScale, t / peakRatio) : lerp(peakScale, 0, (t - peakRatio) / (1 - peakRatio));
+  const opacity = t < halfPoint ? 1 : 1 - Ease.power2In((t - halfPoint) / (1 - halfPoint));
   return { opacity, transform: `scale(${scale.toFixed(4)})` };
 }
 
@@ -400,24 +452,31 @@ export function bubbleFlashExit(raw: number): MotionState {
  * 句子密集（gap 小）→ 更快更炸；间隔长 → 给足动作做完整的时间。
  */
 export function dynamicEnterFrames(gapFrames: number): number {
-  const g = Math.max(4, gapFrames);
-  return Math.round(Math.min(22, Math.max(8, 6 + g * 0.9)));
+  const g = Math.max(ENTER_FRAMES.gapMin, gapFrames);
+  return Math.round(
+    Math.min(
+      ENTER_FRAMES.maxFrames,
+      Math.max(ENTER_FRAMES.minFrames, ENTER_FRAMES.intercept + g * ENTER_FRAMES.k),
+    ),
+  );
 }
 
 /** 动态退场时长（帧） */
 export function dynamicExitFrames(gapFrames: number): number {
-  const g = Math.max(4, gapFrames);
-  return Math.round(Math.min(16, Math.max(6, 4 + g * 0.6)));
+  const g = Math.max(EXIT_FRAMES.gapMin, gapFrames);
+  return Math.round(
+    Math.min(
+      EXIT_FRAMES.maxFrames,
+      Math.max(EXIT_FRAMES.minFrames, EXIT_FRAMES.intercept + g * EXIT_FRAMES.k),
+    ),
+  );
 }
 
 /**
  * 节拍脉冲：返回距离最近一个已过去节拍的衰减能量 0..1。
- * 用来给画面做「随鼓点呼吸」的律动（GSAP 里常写成 gsap.to(..., {yoyo:true})）。
- *
- * @param beats 已排序的节拍帧号数组（这里用每句歌词的起唱帧）
- * @param decay 衰减速度，越大回落越快
+ * 用来给画面做「随鼓点呼吸」的律动。
  */
-export function beatEnergy(frame: number, beats: number[], fps: number, decay = 6): number {
+export function beatEnergy(frame: number, beats: number[], fps: number, decay = BEAT_DECAY): number {
   if (!beats.length) return 0;
   // 二分找最后一个 <= frame 的节拍
   let lo = 0;

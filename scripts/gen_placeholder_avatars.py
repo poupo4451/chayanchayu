@@ -1,9 +1,12 @@
 """
-生成占位头像图片（male-1~4.png / female-1~4.png）
-用户后续可用自己的头像图片直接覆盖同名文件即可。
+生成历史占位头像图片（male-1~4.png / female-1~4.png）。
+
+真实素材现由角色化 PNG 管理；运行本脚本会覆盖兼容别名，
+仅允许在明确传入 --force-placeholders 时用于开发回退。
 """
 import math
 import os
+import sys
 from PIL import Image, ImageDraw
 
 SIZE = 240

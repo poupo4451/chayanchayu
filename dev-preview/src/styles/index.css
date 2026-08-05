@@ -1,0 +1,166 @@
+:root {
+  --bg: #0e0e14;
+  --surface: #17171f;
+  --border: #262633;
+  --text: #e8e8ef;
+  --text2: #8b8b9e;
+  --accent: #07c160; /* 微信绿 */
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 16px 20px 12px;
+  gap: 12px;
+}
+
+/* ── 顶栏 ───────────────────────────────── */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.topbar h1 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.topbar h1 span {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text2);
+}
+
+.genre-picker {
+  display: flex;
+  gap: 6px;
+}
+
+.genre-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.genre-btn:hover {
+  color: var(--text);
+  border-color: #3a3a4d;
+}
+
+.genre-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #04331a;
+  font-weight: 600;
+}
+
+/* ── 舞台 ───────────────────────────────── */
+
+.stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+/* 手机外框：固定 9:16，高度撑满可用空间 */
+.phone {
+  height: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* ── 播放条 ─────────────────────────────── */
+
+.playbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 8px 4px 0;
+}
+
+.playbar button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.playbar button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.progress {
+  flex: 1;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.timecode {
+  font-size: 11px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 130px;
+  text-align: right;
+}
+
+/* ── 提示 ───────────────────────────────── */
+
+.hint {
+  font-size: 11px;
+  color: #55556a;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.hint code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text2);
+}

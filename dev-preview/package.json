@@ -1,0 +1,26 @@
+{
+  "name": "tea-chat-dev-preview",
+  "private": true,
+  "version": "1.0.0",
+  "description": "茶言茶曲 — 动画参数可视化调优工具（独立于主工程）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "studio": "vite"
+  },
+  "dependencies": {
+    "@remotion/player": "4.0.242",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "4.0.242"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.3"
+  }
+}

@@ -1,4 +1,5 @@
 const { getWorksList, deleteWork } = require('../../utils/api');
+const { showError } = require('../../utils/error-tip');
 
 const STAGE_LABELS = {
   pending: '排队中',
@@ -51,8 +52,7 @@ Page({
       }));
       this.setData({ works });
     } catch (e) {
-      console.error(e);
-      wx.showToast({ title: '加载作品失败', icon: 'none' });
+      showError(e, '加载作品失败');
     } finally {
       this.setData({ loading: false });
     }
@@ -143,8 +143,7 @@ Page({
       this.setData({ works });
       wx.showToast({ title: '已删除', icon: 'success' });
     } catch (e) {
-      console.error('delete work failed', e);
-      wx.showToast({ title: e.message || '删除失败', icon: 'none' });
+      showError(e, '删除失败');
     } finally {
       wx.hideLoading();
     }

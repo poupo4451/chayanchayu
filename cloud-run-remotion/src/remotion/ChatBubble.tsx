@@ -41,7 +41,7 @@ export interface BubbleData {
  * 这样「字体与气泡图形的大小比例」始终等于 iOS 微信真机。
  */
 
-/** 头像：微信为完全圆形（borderRadius 50%）。有 avatarId 且素材存在则显示图片，否则回退首字母色块 */
+/** 头像：圆角为边长的 0.2 倍；有 avatarId 且素材存在则显示图片，否则回退首字母色块。 */
 const Avatar: React.FC<{ name: string; avatarId?: string }> = ({ name, avatarId }) => (
   <div
     style={{
@@ -107,7 +107,6 @@ function rowStyle(isSelf: boolean): React.CSSProperties {
     flexDirection: isSelf ? 'row-reverse' : 'row',
     alignItems: 'flex-start',
     gap: WX_SIZE.avatarGap,
-    padding: `0 ${WX_SIZE.edgeX}px`,
     fontFamily: FONT_FAMILY,
   };
 }
@@ -145,72 +144,28 @@ const ContentColumn: React.FC<{
   </div>
 );
 
-/** 红包 / 转账共用的橙色卡片 */
-const PayCard: React.FC<{
-  isSelf: boolean;
-  icon: React.ReactNode;
-  title: string;
-  subtitle?: string;
-  footer: string;
-}> = ({ isSelf, icon, title, subtitle, footer }) => (
-  <div
+/**
+ * PayCard（红包/转账橙色卡片）
+ * 使用标准 SVG 素材，内置尖角、icon 与文字比例。
+ * SVG 的 viewBox 与 WX_SIZE.payCardWidth 宽度对齐，高度等比缩放。
+ */
+const PAY_FILES: Record<string, Record<string, string>> = {
+  redpacket: { left: 'redpacket-left.svg', right: 'redpacket-right.svg' },
+  transfer: { left: 'transfer-left.svg', right: 'transfer-right.svg' },
+};
+
+const PayCard: React.FC<{ payType: 'redpacket' | 'transfer'; role: 'left' | 'right' }> = ({
+  payType,
+  role,
+}) => (
+  <Img
+    src={staticFile(PAY_FILES[payType][role])}
     style={{
-      position: 'relative',
-      width: WX_SIZE.payCardWidth,
-      borderRadius: WX_SIZE.bubbleRadius,
-      background: WX_COLOR.pay,
-      boxShadow: WX_COLOR.bubbleShadow,
+      width: Math.round(WX_SIZE.payCardWidth * 1.1),
+      height: 'auto',
+      display: 'block',
     }}
-  >
-    <BubbleTail side={isSelf ? 'right' : 'left'} color={WX_COLOR.pay} />
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: WX_SIZE.bubblePadH,
-        padding: `${WX_SIZE.bubblePadV * 1.4}px ${WX_SIZE.bubblePadH}px`,
-      }}
-    >
-      {icon}
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <span
-          style={{
-            fontSize: WX_SIZE.bodySize,
-            color: '#FFFFFF',
-            fontWeight: 500,
-            lineHeight: WX_LINE_HEIGHT,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {title}
-        </span>
-        {subtitle ? (
-          <span
-            style={{
-              fontSize: WX_SIZE.timeSize,
-              color: 'rgba(255,255,255,0.85)',
-              marginTop: WX_SIZE.nameGap,
-            }}
-          >
-            {subtitle}
-          </span>
-        ) : null}
-      </div>
-    </div>
-    <div style={{ height: 1, background: 'rgba(255,255,255,0.28)' }} />
-    <span
-      style={{
-        display: 'block',
-        fontSize: WX_SIZE.timeSize,
-        color: 'rgba(255,255,255,0.85)',
-        padding: `${Math.round(WX_SIZE.bubblePadV * 0.7)}px ${WX_SIZE.bubblePadH}px`,
-      }}
-    >
-      {footer}
-    </span>
-  </div>
+  />
 );
 
 export const ChatBubble: React.FC<{
@@ -249,9 +204,9 @@ export const ChatBubble: React.FC<{
   // ── 表情包 / 图片（微信图片消息无气泡底、无尖角） ──
   if (data.type === 'image') {
     return (
-      <div style={rowStyle(isSelf)}>
-        <Avatar name={data.name} avatarId={data.avatarId} />
-        <ContentColumn isSelf={isSelf} name={data.name} maxWidth={maxWidth}>
+      <div style={{ padding: 32, backgroundColor: '#EDEDED' }}>
+        <div style={rowStyle(isSelf)}>
+          <Avatar name={data.name} avatarId={data.avatarId} />
           <img
             src={data.params.imageUrl || ''}
             style={{
@@ -262,7 +217,7 @@ export const ChatBubble: React.FC<{
               display: 'block',
             }}
           />
-        </ContentColumn>
+        </div>
       </div>
     );
   }
@@ -270,18 +225,11 @@ export const ChatBubble: React.FC<{
   // ── 红包 ────────────────────────────────────────
   if (data.type === 'redpacket') {
     return (
-      <div style={rowStyle(isSelf)}>
-        <Avatar name={data.name} avatarId={data.avatarId} />
-        <ContentColumn isSelf={isSelf} name={data.name} maxWidth={maxWidth}>
-          <PayCard
-            isSelf={isSelf}
-            icon={
-              <span style={{ fontSize: WX_SIZE.bodySize * 1.6, lineHeight: 1 }}>🧧</span>
-            }
-            title={data.text || '恭喜发财，大吉大利'}
-            footer="微信红包"
-          />
-        </ContentColumn>
+      <div style={{ padding: 32, backgroundColor: '#EDEDED' }}>
+        <div style={rowStyle(isSelf)}>
+          <Avatar name={data.name} avatarId={data.avatarId} />
+          <PayCard payType="redpacket" role={data.role || 'left'} />
+        </div>
       </div>
     );
   }
@@ -289,48 +237,23 @@ export const ChatBubble: React.FC<{
   // ── 转账 ────────────────────────────────────────
   if (data.type === 'transfer') {
     return (
-      <div style={rowStyle(isSelf)}>
-        <Avatar name={data.name} avatarId={data.avatarId} />
-        <ContentColumn isSelf={isSelf} name={data.name} maxWidth={maxWidth}>
-          <PayCard
-            isSelf={isSelf}
-            icon={
-              <span
-                style={{
-                  width: WX_SIZE.bodySize * 1.8,
-                  height: WX_SIZE.bodySize * 1.8,
-                  borderRadius: '50%',
-                  background: 'rgba(255,255,255,0.24)',
-                  color: '#FFFFFF',
-                  fontSize: WX_SIZE.bodySize,
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                ￥
-              </span>
-            }
-            title={`￥${data.params.amount || '0.00'}`}
-            subtitle={data.text || '转账'}
-            footer="微信转账"
-          />
-        </ContentColumn>
+      <div style={{ padding: 32, backgroundColor: '#EDEDED' }}>
+        <div style={rowStyle(isSelf)}>
+          <Avatar name={data.name} avatarId={data.avatarId} />
+          <PayCard payType="transfer" role={data.role || 'left'} />
+        </div>
       </div>
     );
   }
 
   // ── 文字（默认） ────────────────────────────────
   return (
-    <div style={rowStyle(isSelf)}>
-      <Avatar name={data.name} avatarId={data.avatarId} />
-      <ContentColumn isSelf={isSelf} name={data.name} maxWidth={maxWidth}>
+    <div style={{ padding: 32, backgroundColor: '#EDEDED' }}>
+      <div style={rowStyle(isSelf)}>
+        <Avatar name={data.name} avatarId={data.avatarId} />
         <div
           style={{
             position: 'relative',
-            maxWidth,
             minWidth: WX_SIZE.bubbleMinWidth,
             padding: `${WX_SIZE.bubblePadV}px ${WX_SIZE.bubblePadH}px`,
             borderRadius: WX_SIZE.bubbleRadius,
@@ -348,12 +271,15 @@ export const ChatBubble: React.FC<{
               lineHeight: WX_LINE_HEIGHT,
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
+              maxWidth: '14em',
+              display: 'inline-block',
             }}
           >
             {data.text}
           </span>
         </div>
-      </ContentColumn>
+      </div>
     </div>
   );
 };
+

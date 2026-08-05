@@ -1,4 +1,5 @@
 const { getTaskDetail, startDialogue, regenerateDialogue, confirmDialogue } = require('../../utils/api');
+const { showError } = require('../../utils/error-tip');
 
 Page({
   data: {
@@ -113,7 +114,7 @@ Page({
       const task = await regenerateDialogue(this.data.taskId);
       this.setData({ dialogue: task.dialogue || [] });
     } catch (e) {
-      wx.showToast({ title: '重新生成失败', icon: 'none' });
+      showError(e, '重新生成失败');
     } finally {
       wx.hideLoading();
     }
@@ -125,7 +126,7 @@ Page({
       await confirmDialogue(this.data.taskId, this.data.dialogue);
       wx.redirectTo({ url: `/pages/task-progress/task-progress?taskId=${this.data.taskId}` });
     } catch (e) {
-      wx.showToast({ title: '提交失败', icon: 'none' });
+      showError(e, '提交失败');
     } finally {
       wx.hideLoading();
     }

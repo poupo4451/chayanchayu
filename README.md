@@ -27,42 +27,42 @@
 
 | 属性 | 值 |
 |------|-----|
-| 环境 ID | `chayan-d1gwl5uub1e0e9d0b` |
-| 环境别名 | `chayan` |
+| 环境 ID | `cloud1-d7ggdqfhgc4ee2796` |
+| 环境别名 | `cloud1` |
 | 区域 | ap-shanghai |
 | 状态 | NORMAL |
 
-### 云函数（13 个）
+### 云函数（14 个）
 
-全部云函数均部署在小程序绑定的 `chayan-d1gwl5uub1e0e9d0b` 环境。最近一次代码更新：2026-08-02。
+全部云函数均部署在小程序绑定的 `cloud1-d7ggdqfhgc4ee2796` 环境。最近一次代码更新：2026-08-05。
 
 | 函数名 | 类型 | 运行时 | 状态 |
 |--------|------|--------|------|
-| createTask | Event Function | Nodejs16.13 | ✅ 已部署 |
-| confirmDialogue | Event Function | Nodejs16.13 | ✅ 已部署 |
+| createTask | Event Function | Nodejs16.13 | ✅ 已更新 |
+| confirmDialogue | Event Function | Nodejs16.13 | ✅ 已更新 |
 | generateDialogue | Event Function | Nodejs16.13 | ✅ 已更新 |
 | generateLyrics | Event Function | Nodejs16.13 | ✅ 已更新 |
 | generateMusic | Event Function | Nodejs16.13 | ✅ 已更新 |
 | fetchLyricsTimestamps | Event Function | Nodejs16.13 | ✅ 已更新 |
-| getOpenId | Event Function | Nodejs16.13 | ✅ 已部署 |
+| getOpenId | Event Function | Nodejs16.13 | ✅ 已更新 |
 | getTaskDetail | Event Function | Nodejs16.13 | ✅ 已更新 |
 | getWorksList | Event Function | Nodejs16.13 | ✅ 已更新 |
 | musicCallback | Event Function | Nodejs16.13 | ✅ 已更新 |
 | notifyAndFinalize | Event Function | Nodejs16.13 | ✅ 已更新 |
 | pollMusicStatus | Event Function（每分钟定时触发） | Nodejs16.13 | ✅ 已更新 |
 | renderChatScreenshots | Event Function | Nodejs16.13 | ✅ 已更新 |
+| deleteWork | Event Function | Nodejs16.13 | ✅ 已更新 |
 
 ### CloudRun 渲染服务
 
 | 属性 | 值 |
 |------|-----|
-| 环境 | `chayan-d1gwl5uub1e0e9d0b` |
+| 环境 | `cloud1-d7ggdqfhgc4ee2796` |
 | 服务名 | chat-mv-remotion |
 | 类型 | Container (Dockerfile) |
-| 当前线上版本 | chat-mv-remotion-004 |
-| 本次发布 | chat-mv-remotion-005（构建中） |
-| 规格 | CPU=1, Mem=2GB, MinNum=1, MaxNum=2 |
-| 公网域名 | https://chat-mv-remotion-290149-5-1461115587.sh.run.tcloudbase.com/ |
+| 当前线上版本 | chat-mv-remotion-003（v004 部署中） |
+| 规格 | CPU=1, Mem=2GB, MinNum=0, MaxNum=3 |
+| 公网域名 | https://chat-mv-remotion-290686-7-1462201626.sh.run.tcloudbase.com/ |
 | 端口 | 3000 |
 
 #### API 端点
@@ -87,17 +87,17 @@
 
 | 属性 | 值 |
 |------|-----|
-| 域名 | https://chayanchayu-d4g0fpnxq738c7662-1459907343.tcloudbaseapp.com |
+| 域名 | https://cloud1-d7ggdqfhgc4ee2796-1462201626.tcloudbaseapp.com |
 | 状态 | 已启用 |
 
 ## 验证结果
 
-### 云端渲染验证（2025-07-31）
+### 云端渲染验证（历史记录，2025-07-31）
 
 - **测试 taskId**: `verify-render-001`
 - **渲染耗时**: ~50 秒
 - **输出**: 1.17 MB MP4 视频
-- **视频 URL**: [verify-render-001.mp4](https://6368-chayanchayu-d4g0fpnxq738c7662-1459907343.tcb.qcloud.la/mv/verify-render-001.mp4)
+- **视频产物**: 历史环境产物链接已移除；请在当前环境的 `tasks.resultVideoUrl` 中获取。
 
 #### 视觉验证项（Linux 容器 Chromium + Noto 字体）
 
@@ -116,7 +116,7 @@
 
 ### 1. 微信小程序上传
 
-小程序绑定环境为 `chayan-d1gwl5uub1e0e9d0b`（`miniprogram/app.js`）。需在**微信开发者工具**中：
+小程序绑定环境为 `cloud1-d7ggdqfhgc4ee2796`（`miniprogram/app.js`）。需在**微信开发者工具**中：
 
 1. 打开项目 `miniprogram/` 目录
 2. 确认 AppID 与云开发环境关联

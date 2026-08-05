@@ -12,10 +12,10 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 const db = cloud.database();
 
-// 云托管 Remotion 服务的公网域名（从云托管控制台获取）
+// 与当前 CloudBase 环境的 chat-mv-remotion 服务保持一致；环境变量可用于显式覆盖。
 const REMOTION_SERVICE_URL =
   process.env.REMOTION_SERVICE_URL ||
-  'https://chat-mv-remotion-290149-5-1461115587.sh.run.tcloudbase.com';
+  'https://chat-mv-remotion-288614-10-1459907343.sh.run.tcloudbase.com';
 
 function postToRenderService(taskId) {
   if (!REMOTION_SERVICE_URL) {

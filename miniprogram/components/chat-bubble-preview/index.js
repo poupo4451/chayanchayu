@@ -1,3 +1,5 @@
+const { getStickerUrl } = require('../../utils/stickers');
+
 Component({
   properties: {
     line: {
@@ -5,9 +7,14 @@ Component({
       value: {},
       observer(newVal) {
         const avatarId = newVal && newVal.avatarId;
+        const params = (newVal && newVal.params) || {};
+        // 优先用云函数已经填好的 imageUrl；老数据没填时按 stickerId 兜底
+        const stickerSrc = params.imageUrl
+          || (params.stickerId ? getStickerUrl(params.stickerId) : '');
         this.setData({
           avatarError: false,
           avatarSrc: avatarId ? `/images/avatars/${avatarId}.png` : '',
+          stickerSrc,
         });
       },
     },
@@ -16,6 +23,7 @@ Component({
   data: {
     avatarSrc: '',
     avatarError: false,
+    stickerSrc: '',
   },
 
   methods: {
@@ -23,8 +31,10 @@ Component({
       this.triggerEvent('tap');
     },
     onAvatarError() {
-      // 默认头像素材还没放进 images/avatars 目录时，静默回退到首字母色块头像
       this.setData({ avatarError: true });
+    },
+    onStickerError() {
+      this.setData({ stickerSrc: '' });
     },
   },
 });

@@ -1,5 +1,6 @@
 .preview-page {
   padding-bottom: 180rpx;
+  background: #EDEDED;
 }
 
 .bubble-list {

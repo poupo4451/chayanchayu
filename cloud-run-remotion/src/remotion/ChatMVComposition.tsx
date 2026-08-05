@@ -11,8 +11,6 @@ import {
   bubbleFlashExit,
   dynamicEnterFrames,
   dynamicExitFrames,
-  Ease,
-  lerp,
 } from './gsapMotion';
 
 interface ChatMVProps {
@@ -170,7 +168,8 @@ const BubbleGroup: React.FC<{
   // ── Hero 独占组：单条气泡炸屏 ──────────────────────────────────────
   if (group.hero) {
     const item = group.items[0];
-    const start = item.startFrame ?? group.start;
+    const anticipation = Math.round(fps * 0.5);
+    const start = (item.startFrame ?? group.start) - anticipation;
     const local = frame - start;
 
     const enterFrames = dynamicEnterFrames(Math.max(groupSpan, fps * 0.5));
@@ -180,57 +179,27 @@ const BubbleGroup: React.FC<{
     const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
     const motion = enterMotion(pickHeroVariant(seed), raw, side, energy);
 
-    const idleEnergy = beatEnergy(frame, beats, fps, 5);
-    const breathScale = 1 + 0.06 * idleEnergy;
-    // Hero 放大倍数：原 1.35 配合退场峰值 1.6，叠加后气泡+头像必然冲出 1080px 画布边缘，
+    // Hero 放大倍数：原1.35 配合退场峰值 1.6，叠加后气泡+头像必然冲出1080px 画布边缘，
     // 这里降到 1.18，并配合下方 alignItems:'center' + 气泡收窄，把安全余量留出来
     const heroScale = 1.18;
     const exit = heroExitMotion(exitRaw);
 
-    // 全屏白闪：入场瞬间 + 退场瞬间各爆一下
-    const enterFlash = raw > 0 && raw < 0.15 ? (1 - raw / 0.15) * 0.5 : 0;
-    const exitFlash = exitRaw > 0 && exitRaw < 0.12 ? (1 - exitRaw / 0.12) * 0.6 : 0;
-    const flashAmt = Math.max(enterFlash, exitFlash);
-
-    // 光爆径向光晕：跟随入场进度收束
-    const burst = raw > 0 && raw < 0.5 ? Ease.power2Out(1 - raw / 0.5) : 0;
-
     const combinedOpacity = motion.opacity * exit.opacity;
-    const combinedTransform = `${motion.transform} scale(${(heroScale * breathScale).toFixed(4)}) ${exit.transform}`;
+    // 入场完成后保持静止：不叠加逐帧的节拍呼吸，避免气泡出现后又被 beat 顶得跳一下
+    const combinedTransform = `${motion.transform} scale(${heroScale.toFixed(4)}) ${exit.transform}`;
 
     return (
       <AbsoluteFill>
-        {/* 光爆背景 */}
-        {burst > 0 && (
-          <AbsoluteFill
-            style={{
-              background: `radial-gradient(circle at 50% 50%, rgba(255,255,255,${(burst * 0.55).toFixed(
-                3,
-              )}) 0%, rgba(255,255,255,0) ${45 - burst * 15}%)`,
-              pointerEvents: 'none',
-            }}
-          />
-        )}
-        {/* 全屏白闪 */}
-        {flashAmt > 0 && (
-          <AbsoluteFill
-            style={{ background: `rgba(255,255,255,${flashAmt.toFixed(3)})`, pointerEvents: 'none' }}
-          />
-        )}
         <AbsoluteFill
           style={{
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
-            // 原来是 'stretch'：内容列会被撑满整屏宽度，气泡本身左/右贴边，
-            // 但 scale 的 transformOrigin 是相对这个撑满的整屏容器算的 50% 50%，
-            // 等于从"屏幕正中心"放大一个"本来就偏一侧"的内容，必然把它甩出画布。
-            // 改成 'center' 后容器收缩为内容实际宽度并居中，缩放中心=内容自身中心，
-            // 放大时左右对称扩张，不会额外偏移。
             alignItems: 'center',
+            padding: '0 80px',
             opacity: combinedOpacity,
             transform: combinedTransform,
-            transformOrigin: motion.transformOrigin,
+            transformOrigin: 'center center',
             filter: [motion.filter, exit.filter].filter(Boolean).join(' ') || undefined,
             willChange: 'transform, opacity, filter',
           }}
@@ -250,29 +219,29 @@ const BubbleGroup: React.FC<{
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
-        alignItems: 'stretch',
-        gap: WX_SIZE.rowGap,
         willChange: 'transform, opacity, filter',
       }}
     >
       {group.items.map((item, idx) => {
-        const start = item.startFrame ?? group.start;
+        const anticipation = Math.round(fps * 0.5);
+        const start = (item.startFrame ?? group.start) - anticipation;
         const local = frame - start;
 
         // 未到时间：保留布局占位，只是不可见 —— 保证组内构图稳定
         if (local < 0) {
           return (
-            <div key={item.uid ?? item.index} style={{ opacity: 0, visibility: 'hidden' }}>
+            <div key={item.uid ?? item.index} style={{ opacity: 0, visibility: 'hidden', marginTop: -1 }}>
               <ChatBubble data={item} />
             </div>
           );
         }
 
-        // 动态入场时长：按到下一条气泡的间隔算，密集更快更炸
+        // 动态入场时长：按到下一条气泡的原始间隔算，不受 anticipation 影响
+        const originalStart = item.startFrame ?? group.start;
         const nextStart = idx + 1 < group.items.length
           ? (group.items[idx + 1].startFrame ?? group.end)
           : group.end;
-        const enterFrames = dynamicEnterFrames(Math.max(nextStart - start, 4));
+        const enterFrames = dynamicEnterFrames(Math.max(nextStart - originalStart, 4));
         const raw = Math.min(local / enterFrames, 1);
 
         const energy = beatEnergy(start, beats, fps, 4);
@@ -280,20 +249,19 @@ const BubbleGroup: React.FC<{
         const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
         const motion = enterMotion(pickVariantForGenre(seed, genre), raw, side, energy);
 
-        // 入场结束后继续跟随节拍做细微呼吸缩放
-        const idleEnergy = beatEnergy(frame, beats, fps, 5);
-        const breathScale = 1 + 0.045 * idleEnergy;
-
+        // 入场结束后保持静止：这里曾叠加逐帧的 beatEnergy 呼吸缩放，但配合
+        // 0.5s 提前入场后，气泡早已静止，歌词起唱时的 beat 会孤立地把它顶得跳一下。
         // 个体快闪退场：整组退场窗口内同步触发，制造卡点快切
         const indivExit = bubbleFlashExit(exitRaw);
 
         const combinedOpacity = motion.opacity * indivExit.opacity;
-        const combinedTransform = `${motion.transform} scale(${breathScale.toFixed(4)}) ${indivExit.transform}`;
+        const combinedTransform = `${motion.transform} ${indivExit.transform}`;
 
         return (
           <div
             key={item.uid ?? item.index}
             style={{
+              marginTop: -1,
               opacity: combinedOpacity,
               transform: combinedTransform,
               transformOrigin: motion.transformOrigin,
@@ -347,25 +315,12 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath, b
     return idx;
   }, [groups, frame]);
 
-  // 节奏能量：驱动舞台呼吸与背景光晕
-  const energy = beatEnergy(frame, beatFrames, fps, 5.5);
-  const pulse = 1 + 0.016 * Ease.power2Out(energy);
-  const glow = lerp(0.1, 0.4, energy);
-
   const rendered = groups
     .map((g, i) => ({ g, i }))
     .filter(({ g, i }) => i === activeIdx || (i === activeIdx - 1 && frame < g.end));
 
   return (
-    <AbsoluteFill style={{ backgroundColor: WX_COLOR.canvas, fontFamily: FONT_FAMILY }}>
-      {/* 背景：微信聊天灰 + 跟着鼓点呼吸的柔光，替代原本的完整聊天界面 */}
-      <AbsoluteFill
-        style={{
-          background: `radial-gradient(circle at 50% ${45 - energy * 4}%, rgba(255,255,255,${glow.toFixed(
-            3,
-          )}) 0%, rgba(237,237,237,0) ${(52 + energy * 10).toFixed(1)}%), ${WX_COLOR.canvas}`,
-        }}
-      />
+    <AbsoluteFill style={{ backgroundColor: WX_COLOR.canvas, fontFamily: FONT_FAMILY, overflow: 'hidden' }}>
       {/* 极淡的顶底渐隐，让气泡组浮在画面中央 */}
       <AbsoluteFill
         style={{
@@ -376,12 +331,12 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath, b
 
       {audioPath ? <Audio src={audioPath} /> : null}
 
-      {/* 舞台：整体随节拍轻微呼吸 */}
+      {/* 舞台：固定缩放，不随节拍呼吸（避免气泡入场完成后被beat 顶得整体跳动） */}
       <AbsoluteFill
         style={{
-          transform: `scale(${pulse.toFixed(5)})`,
+          padding: '38px 60px',
+          transform: 'scale(0.8)',
           transformOrigin: '50% 50%',
-          willChange: 'transform',
         }}
       >
         {rendered.map(({ g, i }) => (

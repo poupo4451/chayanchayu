@@ -1,17 +1,16 @@
-# 默认头像素材目录
+# 聊天头像素材目录
 
-请在这里放置与 `miniprogram/images/avatars/` **同名** 的头像图片（用于最终渲染的 MV 视频），
-文件名固定为：
+此目录必须与 `miniprogram/images/avatars/` 保持**同名、同内容**，用于最终 MV 渲染。
+当前角色化头像：
 
 ```
 public/avatars/
-  male-1.png   male-2.png   male-3.png   male-4.png
-  female-1.png female-2.png female-3.png female-4.png
+  male-rich-heir.png  male-playboy.png  male-underdog.png  male-ordinary.png
+  female-green-tea-1.png  female-green-tea-2.png  female-playgirl.png  female-underdog.png
 ```
 
-- 建议正方形、≥200×200px，会被裁成圆形显示。
-- 分配逻辑（由 `cloudfunctions/generateDialogue/avatarAssign.js` 决定）：同一段对话里，
-  每个说话人昵称第一次出现时会稳定分配到某个 `male-*`/`female-*`，全程保持一致。
-- 如果某个文件缺失，`src/render.ts` 的 `resolveAvatars()` 会自动检测并回退成
-  首字母色块头像，不会导致渲染报错，但视频里就看不到真实头像图片。
-- 放好文件后需要重新构建并部署这个云托管服务才能生效。
+- 资源为 240×240 PNG；显示时以 `cover` 裁切为圆角矩形，圆角恒为头像边长的 0.2 倍。
+- `cloudfunctions/generateDialogue/avatarAssign.js` 会先判断性别，再依据该说话人的对话内容匹配视觉角色；没有明显特征时，使用昵称哈希稳定选择。
+- `male-1..4.png` 与 `female-1..4.png` 仅保留为历史任务兼容别名，不能作为新逻辑的目标 ID。
+- 文件缺失时，`src/render.ts` 会回退成首字母色块，避免渲染失败。
+- 更新本目录后必须重新部署 `chat-mv-remotion` 云托管服务。
