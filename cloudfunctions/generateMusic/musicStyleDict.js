@@ -26,7 +26,7 @@ const VOCAL_MODE_SUFFIX = {
 function buildSunoStyle(genre, vocalMode) {
   const base = GENRE_STYLE_TEMPLATES[genre] || GENRE_STYLE_TEMPLATES['随机'];
   const vocalSuffix = VOCAL_MODE_SUFFIX[vocalMode] || VOCAL_MODE_SUFFIX.solo;
-  return `${base}, ${vocalSuffix}`;
+  return `${base}, ${vocalSuffix}, minimal intro under 3 seconds, vocals start almost immediately, skip long instrumental prelude, straight into verse`;
 }
 
 module.exports = { GENRE_STYLE_TEMPLATES, VOCAL_MODE_SUFFIX, buildSunoStyle };
