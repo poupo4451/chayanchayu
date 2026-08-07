@@ -3,21 +3,23 @@
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 20rpx;
+  color: var(--text-main);
 }
 
 .topic-input {
   width: 100%;
   min-height: 160rpx;
-  background: rgba(255,255,255,0.05);
+  background: var(--bg-card);
   border-radius: 16rpx;
   padding: 20rpx;
   font-size: 14px;
-  color: #fff;
+  color: var(--text-main);
   box-sizing: border-box;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);
 }
 
 .placeholder {
-  color: var(--text-sub);
+  color: var(--text-hint);
 }
 
 .chip-row {
@@ -28,16 +30,18 @@
 .chip {
   padding: 14rpx 32rpx;
   border-radius: 32rpx;
-  background: rgba(255,255,255,0.05);
+  background: var(--bg-card);
   color: var(--text-sub);
   font-size: 14px;
   margin-right: 16rpx;
   margin-bottom: 16rpx;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--border);
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.03);
 }
 
 .chip-active {
-  background: linear-gradient(135deg, #FF2D78 0%, #7C3AED 100%);
-  color: #fff;
+  background: linear-gradient(135deg, #00B865 0%, #009A55 100%);
+  color: #FFFFFF;
   border-color: transparent;
+  box-shadow: 0 4rpx 16rpx rgba(0, 184, 101, 0.25);
 }

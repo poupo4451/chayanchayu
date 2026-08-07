@@ -210,10 +210,68 @@ Page({
     });
   },
 
+  onLongPress() {
+    const that = this;
+    wx.showActionSheet({
+      itemList: ['保存视频'],
+      success(res) {
+        if (res.tapIndex === 0) that.doSaveVideo();
+      },
+    });
+  },
+
+  onSaveVideo() {
+    this.doSaveVideo();
+  },
+
+  doSaveVideo() {
+    const url = this.data.work.playUrl;
+    if (!url) {
+      wx.showToast({ title: '视频尚未加载', icon: 'none' });
+      return;
+    }
+    wx.showLoading({ title: '保存中…' });
+    wx.downloadFile({
+      url,
+      success(res) {
+        if (res.statusCode === 200) {
+          wx.saveVideoToPhotosAlbum({
+            filePath: res.tempFilePath,
+            success() {
+              wx.hideLoading();
+              wx.showToast({ title: '已保存到相册', icon: 'success' });
+            },
+            fail(e) {
+              wx.hideLoading();
+              if (e.errMsg && e.errMsg.indexOf('auth deny') >= 0) {
+                wx.showModal({
+                  title: '需要授权',
+                  content: '请允许保存视频到相册',
+                  success(m) {
+                    if (m.confirm) wx.openSetting();
+                  },
+                });
+              } else {
+                wx.showToast({ title: '保存失败', icon: 'none' });
+              }
+            },
+          });
+        } else {
+          wx.hideLoading();
+          wx.showToast({ title: '下载失败', icon: 'none' });
+        }
+      },
+      fail() {
+        wx.hideLoading();
+        wx.showToast({ title: '下载失败', icon: 'none' });
+      },
+    });
+  },
+
   onShareAppMessage() {
     const work = this.data.work || {};
     return {
-      title: `${work.title || '我的作品'} - 茶言茶曲`,
+      title: `${work.title || '我的作品'} - 言语生声`,
       path: `/pages/my-works/detail?workId=${encodeURIComponent(work.id || '')}&title=${encodeURIComponent(work.title || '')}&duration=${encodeURIComponent(work.duration || '')}&videoUrl=${encodeURIComponent(work.videoUrl || '')}&createdAt=${encodeURIComponent(work.createdAt || '')}`,
     };
   },

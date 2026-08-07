@@ -16,7 +16,7 @@ Page({
 
   onShareAppMessage() {
     return {
-      title: '茶言茶曲 - AI聊天记录变MV',
+      title: '言语生声',
     };
   },
 

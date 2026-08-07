@@ -6,8 +6,8 @@
   display: flex;
   height: 110rpx;
   padding-bottom: env(safe-area-inset-bottom);
-  background: #1A1625;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  background: #FFFFFF;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
   z-index: 999;
 }
 
@@ -26,10 +26,10 @@
 
 .tab-text {
   font-size: 11px;
-  color: #A5A0B8;
+  color: #999999;
 }
 
 .tab-text-active {
-  color: #FF2D78;
+  color: #00B865;
   font-weight: 600;
 }

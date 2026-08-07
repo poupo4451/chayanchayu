@@ -1,6 +1,6 @@
 <view class="page" style="padding-top: {{safeTop}}px;">
   <view class="hero card">
-    <text class="page-title">✨ 茶言茶曲</text>
+    <text class="page-title">言语生声</text>
     <text class="page-desc">输入一个主题，AI帮你编一段"很绿茶"的聊天，再变成一首歌</text>
   </view>
 

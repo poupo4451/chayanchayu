@@ -84,7 +84,7 @@ page {
   margin-top: 32rpx;
   padding: 18rpx 56rpx;
   border-radius: 999px;
-  background: linear-gradient(135deg, #FF2D78 0%, #7C3AED 100%);
+  background: linear-gradient(135deg, #00B865 0%, #009A55 100%);
 }
 
 .retry-btn text {
@@ -189,4 +189,21 @@ page {
 .progress-slider {
   flex: 1;
   margin: 0 8rpx;
+}
+
+.save-btn {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 16rpx;
+}
+
+.save-btn text {
+  color: #ffffff;
+  font-size: 20rpx;
 }

@@ -5,7 +5,15 @@ import {
   VARIANT_CYCLE,
   GENRE_VARIANT_POOLS,
   HERO_VARIANT_POOL,
+  HERO_COMBO_POOL,
   type EnterVariant,
+  type HeroCombo,
+  // 退出变体
+  EXIT_VARIANT_CYCLE,
+  HERO_EXIT_VARIANT_POOL,
+  EXIT_VARIANT_PARAMS,
+  HERO_EXIT_VARIANT_PARAMS,
+  type ExitVariant,
   // 时序参数
   ENTER_FRAMES,
   EXIT_FRAMES,
@@ -26,8 +34,8 @@ import {
 // ─────────────────────────────────────────────────────────────────
 // 重新导出类型和池，向后兼容
 // ─────────────────────────────────────────────────────────────────
-export type { EnterVariant };
-export { VARIANT_CYCLE, GENRE_VARIANT_POOLS, HERO_VARIANT_POOL };
+export type { EnterVariant, ExitVariant, HeroCombo };
+export { VARIANT_CYCLE, GENRE_VARIANT_POOLS, HERO_VARIANT_POOL, HERO_COMBO_POOL, EXIT_VARIANT_CYCLE, HERO_EXIT_VARIANT_POOL };
 
 /**
  * GSAP 风格动效引擎（纯函数，无运行时依赖）
@@ -49,6 +57,34 @@ export { VARIANT_CYCLE, GENRE_VARIANT_POOLS, HERO_VARIANT_POOL };
 export type EaseFn = (t: number) => number;
 
 const clamp01 = (t: number): number => (t < 0 ? 0 : t > 1 ? 1 : t);
+
+/**
+ * 伪弹性工具函数
+ * 用于模拟 GSAP back/elastic/overshoot 效果的纯函数
+ */
+export const PseudoElastic = {
+  /**
+   * X 轴弹性挤压：从 `from` 出发 → 1.0，再按 overshoot 过冲到 >1
+   * 效果等同于 gsap 的 backOut 对 scaleX
+   */
+  scaleXPress: (p: number, from: number, overshoot: number): number => {
+    const c1 = overshoot + 1;
+    const c3 = c1 + 1;
+    const v = (1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2));
+    return from + (1 - from) * v;
+  },
+
+  /**
+   * 角度的弹性 settle：从 from 出发 → 0，带过冲（会短暂超过 0）
+   * 效果等同于 gsap 的 backOut 对 rotate
+   */
+  angleSettle: (p: number, from: number, overshoot: number): number => {
+    const c1 = overshoot + 1;
+    const c3 = c1 + 1;
+    const v = (1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2));
+    return from * (1 - v);
+  },
+};
 
 /** GSAP EasePack 移植 */
 export const Ease = {
@@ -137,6 +173,58 @@ export function pickHeroVariant(seed: number): EnterVariant {
   const i =
     ((seed % HERO_VARIANT_POOL.length) + HERO_VARIANT_POOL.length) % HERO_VARIANT_POOL.length;
   return HERO_VARIANT_POOL[i];
+}
+
+// ── Hero 组合动画 ────────────────────────────────────────────
+
+/** 按组序号抽取 Hero Combo（2-3 个变体同时叠加） */
+export function pickHeroCombo(seed: number): HeroCombo {
+  const i = ((seed % HERO_COMBO_POOL.length) + HERO_COMBO_POOL.length) % HERO_COMBO_POOL.length;
+  return [...HERO_COMBO_POOL[i]];
+}
+
+/**
+ * Hero 组合入场动画：将 2-3 个变体的 transform 同时叠加
+ * 每个变体独立计算其 transform/filter，最后合并：
+ * - opacity 取乘积（符合多层半透明叠加的直觉）
+ * - transform 用空格拼接（CSS transform 支持多值空格分隔叠加）
+ * - filter 用空格拼接（多个 filter 函数叠加）
+ */
+export function comboEnterMotion(
+  variants: HeroCombo,
+  raw: number,
+  side: 'left' | 'right' = 'right',
+): MotionState {
+  let opacity = 1;
+  const transforms: string[] = [];
+  const filters: string[] = [];
+
+  for (const v of variants) {
+    const m = enterMotion(v, raw, side);
+    opacity *= m.opacity;
+    if (m.transform) transforms.push(m.transform);
+    if (m.filter) filters.push(m.filter);
+  }
+
+  const result: MotionState = { opacity, transform: 'none' };
+  if (transforms.length > 0) result.transform = transforms.join(' ');
+  if (filters.length > 0) result.filter = filters.join(' ');
+
+  return result;
+}
+
+// ── 退出动画变体选择 ──────────────────────────────────────────────
+
+/** 按组序号轮换退出动画，组间错开不单调 */
+export function pickExitVariant(seed: number): ExitVariant {
+  const i = ((seed % EXIT_VARIANT_CYCLE.length) + EXIT_VARIANT_CYCLE.length) % EXIT_VARIANT_CYCLE.length;
+  return EXIT_VARIANT_CYCLE[i];
+}
+
+/** Hero 退出动画池 */
+export function pickHeroExitVariant(seed: number): ExitVariant {
+  const i = ((seed % HERO_EXIT_VARIANT_POOL.length) + HERO_EXIT_VARIANT_POOL.length) % HERO_EXIT_VARIANT_POOL.length;
+  return HERO_EXIT_VARIANT_POOL[i];
 }
 
 // ── 缓动函数实例（从配置读取参数） ────────────────────────────────────
@@ -352,6 +440,109 @@ export function enterMotion(
       };
     }
 
+    // ── slideDown: 从屏幕上方滑入（power2.out + 模糊消散）────────────
+    case 'slideDown': {
+      const p = Ease.power2Out(t);
+      const y = lerp(-VARIANT_PARAMS.slideDown.distanceY * amp, 0, p);
+      const scale = lerp(VARIANT_PARAMS.slideDown.scaleFrom, 1, p);
+      const blurPx = t < 0.6 ? lerp(VARIANT_PARAMS.slideDown.blurMax * amp, 0, p) : 0;
+      const f = blurPx > 0.3 ? `blur(${blurPx.toFixed(2)}px)` : undefined;
+      return {
+        opacity: fade,
+        filter: f,
+        transform: `translate3d(0,${y.toFixed(2)}px,0) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── scaleX: X 轴横向挤压→弹性释放 ────────────────────────────
+    case 'scaleX': {
+      const p = backSoft(t);
+      const sx = PseudoElastic.scaleXPress(p, VARIANT_PARAMS.scaleX.scaleXFrom, VARIANT_PARAMS.scaleX.backOvershoot);
+      const scale = lerp(0.85, 1, p);
+      return {
+        opacity: fade,
+        transform: `scale(${scale.toFixed(4)}) scaleX(${sx.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── dropIn: 上方坠落 + bounce 弹跳 settle ────────────────────
+    case 'dropIn': {
+      const p = Ease.power2Out(t);
+      const y = lerp(-VARIANT_PARAMS.dropIn.distanceY * amp, 0, Ease.bounceOut(p));
+      const scale = lerp(VARIANT_PARAMS.dropIn.scaleFrom, 1, p);
+      return {
+        opacity: fade,
+        transform: `translate3d(0,${y.toFixed(2)}px,0) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── glowIn: 光晕脉冲入场 ──────────────────────────────────────
+    case 'glowIn': {
+      const p = backSoft(t);
+      const scale = lerp(VARIANT_PARAMS.glowIn.scaleFrom, 1, p);
+      const glow = t < 0.7 ? lerp(VARIANT_PARAMS.glowIn.glowMax * amp, 0, Ease.power2Out(p)) : 0;
+      const f = glow > 0.5
+        ? `drop-shadow(0 0 ${glow.toFixed(1)}px rgba(255,255,255,0.7))`
+        : undefined;
+      return {
+        opacity: fade,
+        filter: f,
+        transform: `scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── spin3d: X+Y 双轴立体旋转入场 ──────────────────────────────
+    case 'spin3d': {
+      const p = backHard(t);
+      const rx = lerp(VARIANT_PARAMS.spin3d.rotateX * amp, 0, p);
+      const ry = lerp(dir * VARIANT_PARAMS.spin3d.rotateY * amp, 0, p);
+      const scale = lerp(VARIANT_PARAMS.spin3d.scaleFrom, 1, p);
+      return {
+        opacity: fade,
+        transform:
+          `perspective(${VARIANT_PARAMS.spin3d.perspective}px) ` +
+          `rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) ` +
+          `scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── paperFlip: 纸角翻转入场（Y 轴 90° → 0°）────────────────────
+    case 'paperFlip': {
+      const p = backSoft(t);
+      const ry = PseudoElastic.angleSettle(
+        p,
+        VARIANT_PARAMS.paperFlip.rotateY,
+        VARIANT_PARAMS.paperFlip.backOvershoot,
+      );
+      const scale = lerp(VARIANT_PARAMS.paperFlip.scaleFrom, 1, p);
+      return {
+        opacity: fade,
+        transform: `rotateY(${ry.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── squeezeIn: Y 轴压扁→弹开释放 ───────────────────────────────
+    case 'squeezeIn': {
+      const p = backSoft(t);
+      const sy = PseudoElastic.scaleXPress(
+        p,
+        VARIANT_PARAMS.squeezeIn.scaleYFrom,
+        VARIANT_PARAMS.squeezeIn.backOvershoot,
+      );
+      const scale = lerp(0.9, 1, p);
+      return {
+        opacity: fade,
+        transform: `scale(${scale.toFixed(4)}) scaleY(${sy.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
     // ═══════ Hero 独占时刻专用变体（更猛更炸）══════════════════════════
 
     case 'flyIn': {
@@ -407,7 +598,179 @@ export function enterMotion(
   }
 }
 
-/** 整组退场：淡出 + 上移 + 轻微缩小 + 模糊，power2.in 收尾干净 */
+// ═══════════════════════════════════════════════════════════════════
+// 退出动画变体 — 九种风格轮换，退场不再单调
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * 通用退出动画调度器
+ * @param variant 退出变体名
+ * @param raw     退场进度 0..1
+ * @param side    'left'=对方气泡, 'right'=自己气泡（影响滑动方向）
+ * @param w       画布宽（用于滑出屏幕边缘的距离计算）
+ * @param h       画布高
+ * @param isHero  是否为 Hero 组（用更猛参数）
+ */
+export function exitMotionVariant(
+  variant: ExitVariant,
+  raw: number,
+  side: 'left' | 'right' = 'right',
+  w: number = CANVAS_WIDTH,
+  h: number = CANVAS_HEIGHT,
+  isHero = false,
+): MotionState {
+  const t = clamp01(raw);
+
+  // 选择参数集
+  const heroKey = variant as keyof typeof HERO_EXIT_VARIANT_PARAMS;
+  const baseKey = variant as keyof typeof EXIT_VARIANT_PARAMS;
+  const hasHeroParams = isHero && (heroKey in HERO_EXIT_VARIANT_PARAMS);
+  const base = EXIT_VARIANT_PARAMS[baseKey];
+
+  switch (variant) {
+    // ── flash: 快闪缩放 (现有逻辑) ──────────────────────────────
+    case 'flash': {
+      const params = hasHeroParams
+        ? { ...FLASH_EXIT_PARAMS, ...HERO_EXIT_VARIANT_PARAMS.flash }
+        : FLASH_EXIT_PARAMS;
+      const peakRatio = params.peakRatio;
+      const peakScale = params.peakScale;
+      const halfPoint = params.fadeHalfPoint;
+      const scale =
+        t < peakRatio
+          ? lerp(1, peakScale, t / peakRatio)
+          : lerp(peakScale, 0, (t - peakRatio) / (1 - peakRatio));
+      const opacity =
+        t < halfPoint
+          ? 1
+          : 1 - Ease.power2In((t - halfPoint) / (1 - halfPoint));
+      return { opacity, transform: `scale(${scale.toFixed(4)})` };
+    }
+
+    // ── zoomOut: 镜头拉远（perspective 推拉镜头感）────────────────
+    case 'zoomOut': {
+      const p = hasHeroParams
+        ? { scaleTo: (HERO_EXIT_VARIANT_PARAMS.zoomOut as { scaleTo: number }).scaleTo, perspective: (HERO_EXIT_VARIANT_PARAMS.zoomOut as { perspective: number }).perspective }
+        : { scaleTo: (base as typeof EXIT_VARIANT_PARAMS.zoomOut).scaleTo, perspective: (base as typeof EXIT_VARIANT_PARAMS.zoomOut).perspective };
+      const scale = lerp(1, p.scaleTo, Ease.power2In(t));
+      const opacity = 1 - Ease.power2In(t);
+      return {
+        opacity,
+        transform: `perspective(${p.perspective}px) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── slideLeft: 向左飞出屏幕边缘 ─────────────────────────────
+    case 'slideLeft': {
+      const params = base as typeof EXIT_VARIANT_PARAMS.slideLeft;
+      const dir = side === 'left' ? -1 : 1;
+      const dist = dir * w * params.distanceX;
+      const x = lerp(0, dist, Ease.power2In(t));
+      const scale = 1 - params.scaleDecay * Ease.power2In(t);
+      const opacity = 1 - Ease.power1Out(t);
+      return {
+        opacity,
+        transform: `translate3d(${x.toFixed(2)}px,0,0) scale(${scale.toFixed(4)})`,
+      };
+    }
+
+    // ── slideRight: 向右飞出屏幕边缘 ─────────────────────────────
+    case 'slideRight': {
+      const params = base as typeof EXIT_VARIANT_PARAMS.slideRight;
+      const dir = side === 'left' ? -1 : 1;
+      const dist = dir * w * params.distanceX;
+      const x = lerp(0, dist, Ease.power2In(t));
+      const scale = 1 - params.scaleDecay * Ease.power2In(t);
+      const opacity = 1 - Ease.power1Out(t);
+      return {
+        opacity,
+        transform: `translate3d(${x.toFixed(2)}px,0,0) scale(${scale.toFixed(4)})`,
+      };
+    }
+
+    // ── slideUp: 向上飘出屏幕 ────────────────────────────────────
+    case 'slideUp': {
+      const params = base as typeof EXIT_VARIANT_PARAMS.slideUp;
+      const y = lerp(0, -h * params.distanceY, Ease.power2In(t));
+      const scale = 1 - params.scaleDecay * Ease.power2In(t);
+      const opacity = 1 - Ease.power1Out(t);
+      return {
+        opacity,
+        transform: `translate3d(0,${y.toFixed(2)}px,0) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── slideDown: 向下坠落出屏幕 ────────────────────────────────
+    case 'slideDown': {
+      const params = base as typeof EXIT_VARIANT_PARAMS.slideDown;
+      const y = lerp(0, h * params.distanceY, Ease.power2In(t));
+      const scale = 1 - params.scaleDecay * Ease.power2In(t);
+      const opacity = 1 - Ease.power1Out(t);
+      return {
+        opacity,
+        transform: `translate3d(0,${y.toFixed(2)}px,0) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── spin: 旋转 + 缩小 + 淡出 ─────────────────────────────────
+    case 'spin': {
+      const params = hasHeroParams
+        ? { rotateZ: (HERO_EXIT_VARIANT_PARAMS.spin as { rotateZ: number }).rotateZ, scaleTo: (HERO_EXIT_VARIANT_PARAMS.spin as { scaleTo: number }).scaleTo }
+        : { rotateZ: (base as typeof EXIT_VARIANT_PARAMS.spin).rotateZ, scaleTo: (base as typeof EXIT_VARIANT_PARAMS.spin).scaleTo };
+      const p = Ease.power2In(t);
+      const rot = lerp(0, params.rotateZ, p);
+      const scale = lerp(1, params.scaleTo, p);
+      const opacity = 1 - Ease.power2In(t);
+      return {
+        opacity,
+        transform: `rotateZ(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── flip3d: Y 轴三维翻转退场 ─────────────────────────────────
+    case 'flip3d': {
+      const params = hasHeroParams
+        ? { rotateY: (HERO_EXIT_VARIANT_PARAMS.flip3d as { rotateY: number }).rotateY, perspective: (HERO_EXIT_VARIANT_PARAMS.flip3d as { perspective: number }).perspective, scaleTo: (HERO_EXIT_VARIANT_PARAMS.flip3d as { scaleTo: number }).scaleTo }
+        : { rotateY: (base as typeof EXIT_VARIANT_PARAMS.flip3d).rotateY, perspective: (base as typeof EXIT_VARIANT_PARAMS.flip3d).perspective, scaleTo: (base as typeof EXIT_VARIANT_PARAMS.flip3d).scaleTo };
+      const p = Ease.power2In(t);
+      const ry = lerp(0, params.rotateY, p);
+      const scale = lerp(1, params.scaleTo, p);
+      // 翻转过半时淡出
+      const opacity = t < 0.5 ? 1 : 1 - Ease.power2In((t - 0.5) / 0.5);
+      return {
+        opacity,
+        transform: `perspective(${params.perspective}px) rotateY(${ry.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    // ── blurOut: 重度模糊 + 轻微缩小（溶解感）────────────────────
+    case 'blurOut': {
+      const params = base as typeof EXIT_VARIANT_PARAMS.blurOut;
+      const p = Ease.power2In(t);
+      const blur = lerp(0, params.blurMax, p);
+      const scale = lerp(1, params.scaleTo, p);
+      const opacity = 1 - Ease.power2In(t);
+      return {
+        opacity,
+        transform: `scale(${scale.toFixed(4)})`,
+        filter: t > 0.05 ? `blur(${blur.toFixed(2)}px)` : undefined,
+        transformOrigin: '50% 50%',
+      };
+    }
+
+    default:
+      return { opacity: 0, transform: 'scale(0)' };
+  }
+}
+
+/**
+ * 旧版整组退场（保持向后兼容）：淡出 + 上移 + 模糊
+ */
 export function exitMotion(raw: number): MotionState {
   const t = clamp01(raw);
   const p = Ease.power2In(t);
@@ -419,7 +782,7 @@ export function exitMotion(raw: number): MotionState {
 }
 
 /**
- * Hero 独占气泡退场：scale 1→peakScale→0 的「快闪缩放」+ 淡出
+ * Hero 退场（向后兼容）：scale 冲高再归零
  */
 export function heroExitMotion(raw: number): MotionState {
   const t = clamp01(raw);
@@ -435,7 +798,7 @@ export function heroExitMotion(raw: number): MotionState {
 }
 
 /**
- * 组内个体「快闪退场」：scale 冲高再瞬间归零，替代整组统一的温柔退场
+ * 组内个体「快闪退场」（向后兼容）：scale 冲高再瞬间归零
  */
 export function bubbleFlashExit(raw: number): MotionState {
   const t = clamp01(raw);

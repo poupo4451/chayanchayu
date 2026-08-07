@@ -8,6 +8,23 @@
  * 使用方式：
  *   - 生产代码中直接 import 所需字段
  *   - dev-preview 中 import 后通过 state 覆盖，实时预览 → 导出 JSON
+ *
+ * ============================================================================
+ * 【硬性规则 — 歌词-气泡时序约束】
+ *
+ * 规则 1（不提前出场）：
+ *   每条气泡的 startFrame 必须 ≥ 其关联歌词行的 startS × fps。
+ *   即：歌词没唱到的部分，对应气泡绝不提前出现在画面中。
+ *   实现层：lyricsAlign.ts 的 computeBubbleTimings() 在插值完成后，
+ *   对每条已锚定歌词行的气泡强制 clamp startFrame ≥ minFrame。
+ *
+ * 规则 2（唱完不退场过早）：
+ *   气泡的 endFrame 必须 ≥ 其关联歌词行的 endS × fps。
+ *   即：歌词还在唱的时候，气泡不能提前消失。
+ *
+ * 规则 3（子气泡顺序对齐）：
+ *   长对话拆成的多条子气泡按 splitStart/splitEnd 比例切分时间跨度，
+ *   保证「唱到哪个字，对应的那截气泡才亮起」。
  * ============================================================================
  */
 
@@ -37,6 +54,13 @@ export type EnterVariant =
   | 'punchIn'     // 前→后：极强缩放压制
   | 'flipX'       // 三维 X 轴翻转
   | 'spinZ'       // Z 轴 360° 旋转 + 缩放
+  | 'slideDown'   // 从屏幕上方滑入
+  | 'scaleX'      // X 轴挤压→释放
+  | 'dropIn'      // 上方坠落弹跳 settle
+  | 'glowIn'      // 光晕脉冲入场
+  | 'spin3d'      // X+Y 双轴旋转
+  | 'paperFlip'   // 纸角翻转入场
+  | 'squeezeIn'   // Y 轴挤压→弹开
   // ── Hero 独占时刻专用（更猛更炸）──
   | 'flyIn'
   | 'tumble3d'
@@ -61,17 +85,27 @@ export const VARIANT_CYCLE: EnterVariant[] = [
   'punchIn',
   'flipX',
   'spinZ',
+  'slideDown',
+  'scaleX',
+  'dropIn',
+  'glowIn',
+  'spin3d',
+  'paperFlip',
+  'squeezeIn',
+  'pop',
+  'slide',
+  'flip',
 ];
 
 /**
  * 按音乐流派分组的动画池
  */
 export const GENRE_VARIANT_POOLS: Record<string, EnterVariant[]> = {
-  嘻哈: ['pop', 'shake', 'zoomIn', 'typewriter', 'swing', 'shine', 'punchIn', 'spinZ'],
-  抖音风: ['shake', 'pop', 'shine', 'zoomIn', 'typewriter', 'flip', 'bounce', 'zoomOut'],
-  粤语说唱: ['pop', 'shake', 'slide', 'swing', 'zoomIn', 'slideUp', 'flipX'],
-  流行: ['slide', 'blurUp', 'zoomIn', 'shine', 'elastic', 'swing', 'bounce', 'flipX'],
-  'R&B': ['blurUp', 'slide', 'elastic', 'flip', 'zoomIn', 'slideUp', 'zoomOut'],
+  嘻哈: ['pop', 'shake', 'zoomIn', 'typewriter', 'swing', 'shine', 'punchIn', 'spinZ', 'scaleX', 'dropIn', 'spin3d'],
+  抖音风: ['shake', 'pop', 'shine', 'zoomIn', 'typewriter', 'flip', 'bounce', 'zoomOut', 'slideDown', 'paperFlip', 'squeezeIn'],
+  粤语说唱: ['pop', 'shake', 'slide', 'swing', 'zoomIn', 'slideUp', 'flipX', 'glowIn', 'scaleX', 'spinZ'],
+  流行: ['slide', 'blurUp', 'zoomIn', 'shine', 'elastic', 'swing', 'bounce', 'flipX', 'dropIn', 'paperFlip', 'glowIn'],
+  'R&B': ['blurUp', 'slide', 'elastic', 'flip', 'zoomIn', 'slideUp', 'zoomOut', 'squeezeIn', 'spin3d', 'glowIn', 'slideDown'],
   随机: VARIANT_CYCLE,
 };
 
@@ -190,6 +224,38 @@ export const VARIANT_PARAMS = {
     rotateZ: 60, // deg, 轻旋，有方向感但不浮夸
     scaleFrom: 0.55,
   },
+  slideDown: {
+    distanceY: -200, // px, 从上方滑入
+    scaleFrom: 0.88,
+    blurMax: 8, // px
+  },
+  scaleX: {
+    scaleXFrom: 0.35, // X 轴挤压起步，弹性释放
+    backOvershoot: 0.45,
+  },
+  dropIn: {
+    distanceY: -300, // px, 从高处坠落
+    scaleFrom: 0.5,
+  },
+  glowIn: {
+    scaleFrom: 0.7,
+    glowMax: 22, // 光晕强度
+  },
+  spin3d: {
+    rotateX: 45, // deg
+    rotateY: 30, // deg
+    scaleFrom: 0.35,
+    perspective: 700,
+  },
+  paperFlip: {
+    rotateY: 90, // deg, 从 Y 轴 90° 翻到 0°
+    scaleFrom: 0.75,
+    backOvershoot: 1.03,
+  },
+  squeezeIn: {
+    scaleYFrom: 0.3, // Y 轴压扁→弹开
+    backOvershoot: 0.5,
+  },
 } as const;
 
 /** Hero 变体参数 */
@@ -238,21 +304,168 @@ export const FLASH_EXIT_PARAMS = {
   fadeHalfPoint: 0.4,
 } as const;
 
+// ============================================================
+// 退出动画变体 — 丰富退场表现力
+// ============================================================
+
+/**
+ * 退出动画变体名
+ * - flash:    现有快闪缩放 (scale 冲高→归零)
+ * - zoomOut:  镜头拉远 (perspective + scale 1→0.15，推拉镜头感)
+ * - slideLeft:   向左飞出屏幕边缘
+ * - slideRight:  向右飞出屏幕边缘
+ * - slideUp:     向上飘出屏幕
+ * - slideDown:   向下坠落出屏幕
+ * - spin:    旋转 + 缩小 + 淡出
+ * - flip3d:  三维翻转退场
+ * - blurOut: 重度模糊 + 淡出（溶解感）
+ */
+export type ExitVariant =
+  | 'flash'
+  | 'zoomOut'
+  | 'slideLeft'
+  | 'slideRight'
+  | 'slideUp'
+  | 'slideDown'
+  | 'spin'
+  | 'flip3d'
+  | 'blurOut';
+
+/** 普通组退出动画轮换池（按组序号抽选） */
+export const EXIT_VARIANT_CYCLE: ExitVariant[] = [
+  'flash',
+  'zoomOut',
+  'slideLeft',
+  'spin',
+  'blurOut',
+  'flip3d',
+  'slideRight',
+  'zoomOut',
+  'slideUp',
+  'flash',
+  'slideDown',
+  'spin',
+];
+
+/** Hero 组退出动画池（更炸裂的退场） */
+export const HERO_EXIT_VARIANT_POOL: ExitVariant[] = [
+  'zoomOut',   // 镜头猛拉远
+  'flip3d',    // 3D 翻转
+  'spin',      // 旋转飞走
+  'flash',     // 快闪
+];
+
+/** 各退出变体的参数 */
+export const EXIT_VARIANT_PARAMS = {
+  flash: {
+    peakRatio: 0.35,
+    peakScale: 1.18,
+    fadeHalfPoint: 0.4,
+  },
+  zoomOut: {
+    /** 最终缩放目标（越小=拉得越远） */
+    scaleTo: 0.15,
+    /** 透视距离 */
+    perspective: 800,
+  },
+  slideLeft: {
+    /** X 轴飞出距离（canvas 宽度倍数） */
+    distanceX: 1.5,
+    /** 是否同时缩小 */
+    scaleDecay: 0.15,
+  },
+  slideRight: {
+    distanceX: 1.5,
+    scaleDecay: 0.15,
+  },
+  slideUp: {
+    distanceY: 1.5,
+    scaleDecay: 0.1,
+  },
+  slideDown: {
+    distanceY: 1.5,
+    scaleDecay: 0.1,
+  },
+  spin: {
+    /** 旋转角度 */
+    rotateZ: 35,
+    /** 最终缩放 */
+    scaleTo: 0,
+  },
+  flip3d: {
+    /** 绕 Y 轴旋转角度 */
+    rotateY: 85,
+    /** 透视距离 */
+    perspective: 600,
+    /** 最终缩放 */
+    scaleTo: 0.3,
+  },
+  blurOut: {
+    /** 最大模糊像素 */
+    blurMax: 24,
+    /** 最终缩放 */
+    scaleTo: 0.85,
+  },
+} as const;
+
+/** Hero 退出变体参数（可覆盖普通版，更猛） */
+export const HERO_EXIT_VARIANT_PARAMS = {
+  zoomOut: {
+    scaleTo: 0.08,
+    perspective: 600,
+  },
+  flip3d: {
+    rotateY: 120,
+    perspective: 500,
+    scaleTo: 0,
+  },
+  spin: {
+    rotateZ: 60,
+    scaleTo: 0,
+  },
+  flash: {
+    peakRatio: 0.3,
+    peakScale: 1.25,
+    fadeHalfPoint: 0.35,
+  },
+} as const;
+
 /** 节拍脉冲衰减速度 */
 export const BEAT_DECAY = 6;
+
+// ============================================================
+// Hero 高潮组合动画 — 多动画叠加，炸屏更猛
+// ============================================================
+
+/** Hero 组合动画：每个 combo 包含 2-3 个变体名，同时叠加执行 */
+export type HeroCombo = EnterVariant[];
+
+export const HERO_COMBO_POOL: HeroCombo[] = [
+  ['flyIn', 'flash'],
+  ['tumble3d', 'warp'],
+  ['flyIn', 'warp', 'flash'],
+  ['tumble3d', 'flash'],
+  ['warp', 'flyIn'],
+  ['flyIn', 'tumble3d', 'flash'],
+  ['flyIn', 'warp'],
+  ['tumble3d', 'flyIn', 'warp'],
+];
 
 // ============================================================
 // 4. 布局与组参数
 // ============================================================
 
 /** 每屏幕最大气泡数 */
-export const MAX_PER_GROUP = 3;
+export const MAX_PER_GROUP = 4;
 
 /** 组内最大跨度（秒） */
-export const GROUP_MAX_SPAN_S = 4.5;
+export const GROUP_MAX_SPAN_S = 8;
 
 /** 组间最大间隔（秒） */
-export const GROUP_MAX_GAP_S = 1.2;
+export const GROUP_MAX_GAP_S = 3.5;
+
+/** 每组场景缩放范围（伪随机取值，切换组时产生推拉镜头感） */
+export const GROUP_SCALE_RANGE = { min: 0.75, max: 0.95 } as const;
 
 // ============================================================
 // 5. Hero 气泡参数
@@ -279,7 +492,7 @@ export const CANVAS_WIDTH = 1080;
 export const CANVAS_HEIGHT = 1920;
 
 const IPHONE_LOGICAL_WIDTH = 375;
-const ZOOM = 1.15;
+const ZOOM = 1.35;
 
 export const PX_PER_PT = (CANVAS_WIDTH / IPHONE_LOGICAL_WIDTH) * ZOOM;
 
@@ -291,7 +504,7 @@ export const FONT_FAMILY =
   "'Noto Sans CJK SC', 'Source Han Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif";
 
 export const WX_COLORS = {
-  canvas: '#000000',
+  canvas: '#222222',
   bubbleSelf: '#95EC69',
   bubbleOther: '#FFFFFF',
   textBody: '#191919',
@@ -310,12 +523,12 @@ export const WX_SIZES = {
   avatarRadius: Math.round(pt(40) * 0.2),
   avatarGap: pt(10),
   avatarFont: pt(17),
-  edgeX: pt(16),
+  edgeX: pt(28),
   rowGap: pt(14),
   bubbleRadius: pt(5),
   bubblePadV: pt(9.5),
   bubblePadH: pt(12),
-  bubbleMaxWidth: pt(208),
+  bubbleMaxWidth: pt(230),
   bubbleMinWidth: pt(22),
   tailW: pt(6),
   tailH: pt(11),
@@ -365,6 +578,10 @@ export interface AnimationConfig {
   exitParams: typeof EXIT_PARAMS;
   heroExitParams: typeof HERO_EXIT_PARAMS;
   flashExitParams: typeof FLASH_EXIT_PARAMS;
+  exitVariantCycle: string[];
+  heroExitVariantPool: string[];
+  exitVariantParams: Record<string, Record<string, number>>;
+  heroExitVariantParams: Record<string, Record<string, number>>;
   beatDecay: number;
   maxPerGroup: number;
   groupMaxSpanS: number;
@@ -373,6 +590,7 @@ export interface AnimationConfig {
   forceHeroEvery: number;
   heroScale: typeof HERO_SCALE;
   flashAmount: typeof FLASH_AMOUNT;
+  heroComboPool: string[][];
   canvasWidth: number;
   canvasHeight: number;
   zoom: number;
@@ -400,6 +618,10 @@ export function getDefaultConfig(): AnimationConfig {
     exitParams: { ...EXIT_PARAMS },
     heroExitParams: { ...HERO_EXIT_PARAMS },
     flashExitParams: { ...FLASH_EXIT_PARAMS },
+    exitVariantCycle: [...EXIT_VARIANT_CYCLE],
+    heroExitVariantPool: [...HERO_EXIT_VARIANT_POOL],
+    exitVariantParams: JSON.parse(JSON.stringify(EXIT_VARIANT_PARAMS)),
+    heroExitVariantParams: JSON.parse(JSON.stringify(HERO_EXIT_VARIANT_PARAMS)),
     beatDecay: BEAT_DECAY,
     maxPerGroup: MAX_PER_GROUP,
     groupMaxSpanS: GROUP_MAX_SPAN_S,
@@ -408,6 +630,7 @@ export function getDefaultConfig(): AnimationConfig {
     forceHeroEvery: FORCE_HERO_EVERY,
     heroScale: { ...HERO_SCALE },
     flashAmount: { ...FLASH_AMOUNT },
+    heroComboPool: HERO_COMBO_POOL.map((c) => [...c]),
     canvasWidth: CANVAS_WIDTH,
     canvasHeight: CANVAS_HEIGHT,
     zoom: ZOOM,

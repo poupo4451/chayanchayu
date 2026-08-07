@@ -1,7 +1,7 @@
 {
   "navigationBarTitleText": "对话预览",
-  "navigationBarBackgroundColor": "#1A1625",
-  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#FFFFFF",
+  "navigationBarTextStyle": "black",
   "usingComponents": {
     "chat-bubble-preview": "/components/chat-bubble-preview/index"
   }

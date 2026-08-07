@@ -110,25 +110,40 @@ function buildPrompt({ entries, genre, genderInfo }) {
     ? '\n- 这是粤语说唱，每一句都要用粤语口语用词和粤语押韵习惯书写（比如"佈/嘅/唔/係/咩/啦"这类字词），不要写成普通话。'
     : '';
 
-  return `你是一位专业说唱/流行歌曲词作者。下面是一段完整聊天对话，请把它逐条改写成可以演唱的歌词——**每一条对话对应且仅对应一句唱词，不合并、不拆分、不增删、不调换顺序、全曲不允许出现重复的记忆点副歌**，风格为「${genre}」。
+  return `你是一位专业说唱/流行歌曲词作者。下面是一段完整聊天对话，请把它改写成一首有清晰曲式结构（Intro-Verse-Chorus-Bridge-Outro）的歌曲歌词，风格为「${genre}」。
 
 聊天对话内容（共 ${n} 条，每行开头 [数字] 是序号，输出时必须严格按这个顺序一一对应）：
 ${list}
 
 说话人声部：${vocalNote}
 
-歌词改写硬性要求：
-1. 输出的 lines 数组长度必须严格等于 ${n}，第 i 句唱词对应且仅对应上面第 [i] 条对话，顺序不能变、不能跳过。
-2. **【最高优先级】尽量直接用原文：绝大多数句子直接用原对话文字即可，因为现代说唱/流行歌词本身就是口语化的。只有当原文字数太少（如"嗯""哦""好的"这种单字回复）或者读起来确实不押韵/拗口时，才做最小幅度的微调——补一个语气词、换一个同义押韵字、或者把"我今天好累"改成"今天好累啊"这种级别的小改。能不动就不要动，不要在每一句上面炫技改写。**
-3. 内容、情节、语义要紧贴对应那条对话本身，不能编造原对话里没有的情节，不能把这条对话的内容写到别的句子里。
-4. 严禁整首词出现"副歌重复/记忆点钩子"式的整句复制粘贴——就算原对话里两条内容相近，这两句唱词也要各自独立措辞，不能写成完全相同或几乎相同的句子，情绪和记忆点也要通过歌词本身的措辞、押韵和情节推进来表达，不能靠重复一句话来制造。
+改写要求：
+1. **最高优先级：尽量直接用原文**。绝大多数句子直接用原对话文字即可，因为现代说唱/流行歌词本身就是口语化的。只有当原文字数太少（如"嗯""哦""好的"）或者读起来确实不押韵/拗口时，才做最小幅度的微调。能不动就不要动。
+2. 输出的 lines 数组长度必须严格等于 ${n}，第 i 句对应且仅对应上面第 [i] 条对话，顺序不能变、不能跳过。
+3. 内容、情节、语义要紧贴对应那条对话本身，不能编造原对话里没有的情节。
+4. **副歌允许重复**：选出对话里情感最强烈、最有记忆点的 2~4 条作为副歌 hook，在 sections 里让它们重复 1~2 次。副歌行的内容必须和 lines 里对应的行完全一致（从 lines 里原样引用行号，不要重写内容）。
 5. 严禁把对话中任何说话人的昵称/称呼原样写进歌词正文。
-6. 「〔〕」标注的是特殊消息（表情包/红包/转账），用一句简短唱词描述这个动作或它带来的情绪即可，不要照搬括号里的模板文字。
-7. 押韵、节奏、flow 感尽量兼顾，但字数不用整齐划一——短的对话就写短句，长的对话就写长句，自然交替，不要为了凑字数硬拉长或硬缩短原意。${cantoneseNote}
-8. 严格输出 JSON 对象，不要输出任何解释、说明或 markdown 代码块标记。
+6. 「〔〕」标注的是特殊消息（表情包/红包/转账），用一句简短唱词描述这个动作或它带来的情绪即可。${cantoneseNote}
+7. 严格输出 JSON 对象，不要输出任何解释、说明或 markdown 代码块标记。
 
 输出 JSON 格式（lines 数组长度必须严格等于 ${n}）：
-{"lines": ["第0条对应的唱词", "第1条对应的唱词", "..."]}`;
+{
+  "lines": ["第0条对应的唱词", "第1条对应的唱词", "..."],
+  "sections": [
+    {"tag": "Intro", "lineIndices": [0, 1]},
+    {"tag": "Verse 1", "lineIndices": [2, 3, 4, 5]},
+    {"tag": "Chorus", "lineIndices": [6, 7]},
+    {"tag": "Verse 2", "lineIndices": [8, 9, 10, 11]},
+    {"tag": "Chorus", "lineIndices": [6, 7]},
+    {"tag": "Outro", "lineIndices": [12, 13]}
+  ]
+}
+
+sections 要求：
+- tag 从 Intro / Verse 1 / Chorus / Verse 2 / Bridge / Outro 中选择
+- 每个 section 的 lineIndices 是 lines 数组的索引，所有 lineIndices 覆盖完整 0~${n - 1}，不允许遗漏任何索引
+- 副歌 Chorus 的 lineIndices 必须引用之前已在其他 section 出现过的行号（从 lines 里原样重复），内容完全一致，不要重写
+- 至少包含 1 个 Chorus 段，intro 可短（2~3 行），如果对话条数太少（<8 条）可省略 Bridge`;
 }
 
 async function callLLMForLyrics({ entries, genre, genderInfo, modelName }) {
@@ -145,7 +160,7 @@ async function callLLMForLyrics({ entries, genre, genderInfo, modelName }) {
   return (result.text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
 }
 
-// 解析 LLM 输出的 lines 数组；解析失败或数量不对时不抛错，交给 reconcileLines 兜底补齐/截断
+// 解析 LLM 输出的 lines 数组和 sections；解析失败或数量不对时不抛错，交给 reconcileLines / autoGenerateSections 兜底
 function parseLinesResult(raw) {
   try {
     const start = raw.indexOf('{');
@@ -153,12 +168,15 @@ function parseLinesResult(raw) {
     const jsonStr = start !== -1 && end !== -1 && end > start ? raw.slice(start, end + 1) : raw;
     const obj = JSON.parse(jsonStr);
     if (obj && Array.isArray(obj.lines)) {
-      return obj.lines.map((s) => (typeof s === 'string' ? s.trim() : ''));
+      return {
+        lines: obj.lines.map((s) => (typeof s === 'string' ? s.trim() : '')),
+        sections: Array.isArray(obj.sections) ? obj.sections : null,
+      };
     }
   } catch (_) {
     // 忽略，走兜底
   }
-  return [];
+  return { lines: [], sections: null };
 }
 
 /**
@@ -174,25 +192,98 @@ function reconcileLines(llmLines, entries) {
 }
 
 /**
- * 按声部切换插入分段标记（如 [Female]/[Male]），并生成最终 lyrics 文本 + lyricsLineMap。
- * 标记行 dialogueIndex 记为 -1——渲染对齐层（lyricsAlign.ts）已知 -1 会被跳过，
- * 且 `[Female]`/`[Male]` 这种括号包裹的短行本身也会被判定为「段落标记行」，不影响气泡时间轴。
+ * LLM 未输出 sections 时的规则引擎兜底：
+ * - 前 2 行 → Intro
+ * - 中间 → Verse N（每 4 行一组）
+ * - 对话条数 ≥ 8 时，在约 1/3 处抽 2~3 行做 Chorus，并在倒数第 2 段前重复一次
+ * - 最后 2 行 → Outro
  */
-function assembleLyrics({ entries, lines, genderInfo }) {
+function range(start, end) {
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
+
+function autoGenerateSections(lineCount) {
+  const sections = [];
+  if (lineCount <= 4) {
+    sections.push({ tag: 'Intro', lineIndices: [...Array(lineCount).keys()] });
+    return sections;
+  }
+
+  // Intro: first 2 lines
+  sections.push({ tag: 'Intro', lineIndices: [0, 1] });
+  let cursor = 2;
+
+  // Determine chorus position: around 1/3 through
+  const hasChorus = lineCount >= 8;
+  const chorusStart = hasChorus ? Math.floor(lineCount / 3) : lineCount;
+  const chorusSize = Math.min(3, lineCount - chorusStart - 2);
+  const chorusIndices = hasChorus && chorusSize >= 1 ? range(chorusStart, chorusStart + chorusSize - 1) : null;
+
+  // Verse 1: from cursor to chorusStart (or to last 2 lines if no chorus)
+  if (hasChorus && cursor < chorusStart) {
+    sections.push({ tag: 'Verse 1', lineIndices: range(cursor, chorusStart - 1) });
+  } else if (!hasChorus && cursor < lineCount - 2) {
+    sections.push({ tag: 'Verse 1', lineIndices: range(cursor, lineCount - 3) });
+    cursor = lineCount - 2;
+  }
+
+  // Chorus (first appearance)
+  if (hasChorus && chorusIndices) {
+    sections.push({ tag: 'Chorus', lineIndices: chorusIndices });
+    cursor = chorusStart + chorusSize;
+  }
+
+  // Remaining lines between first chorus and outro
+  const outroCount = Math.min(2, lineCount - cursor);
+  const remainingBeforeOutro = lineCount - cursor - outroCount;
+  if (remainingBeforeOutro > 0) {
+    sections.push({ tag: 'Verse 2', lineIndices: range(cursor, cursor + remainingBeforeOutro - 1) });
+    cursor += remainingBeforeOutro;
+
+    // Repeat chorus
+    if (hasChorus && chorusIndices) {
+      sections.push({ tag: 'Chorus', lineIndices: chorusIndices });
+    }
+  }
+
+  // Outro: last 2 lines
+  if (cursor < lineCount) {
+    sections.push({ tag: 'Outro', lineIndices: range(cursor, lineCount - 1) });
+  }
+
+  return sections;
+}
+
+/**
+ * 按 sections 结构组装歌词文本 + lyricsLineMap。
+ * 声部标记 [Male]/[Female] 嵌套在 section 标记 [Verse]/[Chorus] 之下。
+ * 副歌重复行：同一个 dialogueIndex 在 lyricsLineMap 中出现多次（不同 lineIndex），
+ * 渲染层 computeBubbleTimings 的 span 合并逻辑会自动兜底，气泡不会消失又出现。
+ */
+function assembleLyrics({ entries, lines, genderInfo, sections }) {
   const { genderByName, isDuet } = genderInfo;
   const rows = [];
-  let lastGender = null;
 
-  entries.forEach((entry, i) => {
-    if (isDuet) {
-      const gender = genderByName.get(entry.name) === 'female' ? 'female' : 'male';
-      if (gender !== lastGender) {
-        rows.push({ text: gender === 'female' ? '[Female]' : '[Male]', dialogueIndex: -1 });
-        lastGender = gender;
+  for (const sec of sections) {
+    // Section tag: [Intro], [Verse 1], [Chorus], etc.
+    rows.push({ text: `[${sec.tag}]`, dialogueIndex: -1 });
+
+    let lastGender = null;
+    for (const idx of sec.lineIndices) {
+      const entry = entries[idx];
+      const line = lines[idx];
+      if (!line) continue;
+
+      if (isDuet) {
+        const gender = genderByName.get(entry.name) === 'female' ? 'female' : 'male';
+        if (gender !== lastGender) {
+          rows.push({ text: gender === 'female' ? '[Female]' : '[Male]', dialogueIndex: -1 });
+          lastGender = gender;
+        }
       }
+      rows.push({ text: line, dialogueIndex: entry._originalIndex });
     }
-    rows.push({ text: lines[i], dialogueIndex: entry._originalIndex });
-  });
+  }
 
   const lyrics = rows.map((r) => r.text).join('\n');
   const lineMap = rows.map((r, lineIndex) => ({ lineIndex, dialogueIndex: r.dialogueIndex }));
@@ -220,6 +311,7 @@ exports.main = async (event) => {
     }
 
     let llmLines = [];
+    let llmSections = null;
     let lastError = null;
     const startedAt = Date.now();
     // 429 是并发限流，瞬发重试只会持续被拒；这里做退避 + 模型轮换，
@@ -228,7 +320,9 @@ exports.main = async (event) => {
       const modelName = MODEL_CANDIDATES[attempt % MODEL_CANDIDATES.length];
       try {
         const raw = await callLLMForLyrics({ entries, genre, genderInfo, modelName });
-        llmLines = parseLinesResult(raw);
+        const parsed = parseLinesResult(raw);
+        llmLines = parsed.lines;
+        llmSections = parsed.sections;
         if (llmLines.length > 0) {
           lastError = null;
           break;
@@ -262,12 +356,20 @@ exports.main = async (event) => {
     }
 
     const lines = reconcileLines(llmLines, entries);
-    const { lyrics, lineMap } = assembleLyrics({ entries, lines, genderInfo });
+
+    // 兜底：LLM 未返回 sections 或 sections 不完整 → 规则引擎自动生成
+    let sections = llmSections;
+    if (!sections || !Array.isArray(sections) || sections.length === 0) {
+      sections = autoGenerateSections(entries.length);
+    }
+
+    const { lyrics, lineMap } = assembleLyrics({ entries, lines, genderInfo, sections });
 
     await tasksCol.doc(taskId).update({
       data: {
         lyrics,
         lyricsLineMap: lineMap,
+        lyricsSections: sections,
         'style.musicGenre': genre,
         'style.vocalMode': genderInfo.vocalMode,
         status: 'generating_music',

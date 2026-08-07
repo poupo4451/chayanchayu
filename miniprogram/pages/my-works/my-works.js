@@ -1,4 +1,4 @@
-const { getWorksList, deleteWork } = require('../../utils/api');
+const { getWorksList, deleteWork, getUserProfile, updateUserProfile } = require('../../utils/api');
 const { showError } = require('../../utils/error-tip');
 
 const STAGE_LABELS = {
@@ -17,11 +17,26 @@ function encodeQueryValue(value) {
   return encodeURIComponent(value == null ? '' : String(value));
 }
 
+function formatTime(timestamp) {
+  if (!timestamp) return '';
+  const d = new Date(timestamp);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${day} ${h}:${min}`;
+}
+
 Page({
   data: {
     works: [],
     loading: true,
     safeTop: 60,
+    userProfile: {
+      nickName: '',
+      avatarUrl: '',
+    },
   },
 
   // 滑动状态（不放入 data 避免频繁 setData）
@@ -38,8 +53,65 @@ Page({
   },
 
   onShow() {
+    this.loadProfile();
     this.loadWorks();
   },
+
+  // ---- 用户资料 ----
+
+  async loadProfile() {
+    try {
+      const profile = await getUserProfile();
+      if (profile) {
+        this.setData({
+          userProfile: {
+            nickName: profile.nickName || '',
+            avatarUrl: profile.avatarUrl || '',
+          },
+        });
+      }
+    } catch (e) {
+      console.warn('加载用户资料失败', e);
+    }
+  },
+
+  onChooseAvatar(e) {
+    const { avatarUrl } = e.detail; // 临时路径
+    if (!avatarUrl) return;
+
+    wx.showLoading({ title: '上传中…', mask: true });
+    // 上传到云存储
+    wx.cloud.uploadFile({
+      cloudPath: `avatars/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`,
+      filePath: avatarUrl,
+      success: (res) => {
+        const cloudUrl = res.fileID;
+        this.setData({ 'userProfile.avatarUrl': cloudUrl });
+        // 异步保存到数据库
+        updateUserProfile({ avatarUrl: cloudUrl }).catch((err) => {
+          console.warn('保存头像失败', err);
+        });
+      },
+      fail: (err) => {
+        console.error('上传头像失败', err);
+        wx.showToast({ title: '头像上传失败', icon: 'none' });
+      },
+      complete: () => {
+        wx.hideLoading();
+      },
+    });
+  },
+
+  onNicknameBlur(e) {
+    const nickName = e.detail.value || '';
+    if (!nickName || nickName === this.data.userProfile.nickName) return;
+    this.setData({ 'userProfile.nickName': nickName });
+    updateUserProfile({ nickName }).catch((err) => {
+      console.warn('保存昵称失败', err);
+    });
+  },
+
+  // ---- 作品列表 ----
 
   async loadWorks() {
     this.setData({ loading: true });
@@ -48,6 +120,7 @@ Page({
       const works = (list || []).map((item) => ({
         ...item,
         statusLabel: item.type === 'task' ? (STAGE_LABELS[item.status] || '进行中') : '',
+        createdAtText: formatTime(item.createdAt),
         swipeX: 0,
       }));
       this.setData({ works });
@@ -212,6 +285,6 @@ Page({
   },
 
   onShareAppMessage() {
-    return { title: '茶言茶曲 - 我的作品' };
+    return { title: '我的作品 - 言语生声' };
   },
 });

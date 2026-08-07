@@ -7,11 +7,15 @@ import {
   enterMotion,
   pickVariantForGenre,
   pickHeroVariant,
-  heroExitMotion,
-  bubbleFlashExit,
+  comboEnterMotion,
+  pickHeroCombo,
+  exitMotionVariant,
+  pickExitVariant,
+  pickHeroExitVariant,
   dynamicEnterFrames,
   dynamicExitFrames,
 } from './gsapMotion';
+import { CANVAS_WIDTH, GROUP_SCALE_RANGE } from './animation-config';
 
 interface ChatMVProps {
   bubbles: BubbleData[];
@@ -41,15 +45,27 @@ interface ChatMVProps {
  * 气泡入场幅度也会跟着当拍能量放大，鼓点越密动作越有劲。
  */
 
-const MAX_PER_GROUP = 3;
+const MAX_PER_GROUP = 4;
 /** 组内首尾最大跨度（秒），超过就分组 */
-const GROUP_MAX_SPAN_S = 7;
+const GROUP_MAX_SPAN_S = 8;
 /** 组内相邻两条最大间隔（秒），超过就分组 */
-const GROUP_MAX_GAP_S = 2.4;
+const GROUP_MAX_GAP_S = 3.5;
 /** Hero 独占时刻最低占比，低于此值触发节奏兜底强制抽条 */
 const HERO_MIN_RATIO = 0.15;
 /** 节奏兜底：每多少个非 Hero 组强制把末条抽成独立 Hero */
 const FORCE_HERO_EVERY = 5;
+/**
+ * 尾帧安全边距（秒）：最后一组气泡的结束帧延长这么多，
+ * 防止音频实际时长超过 Suno 上报值时动画被切断。
+ * 这个延长仅在 Remotion 合成内部生效，不会拖长最终视频（视频时长由 composition 决定）。
+ */
+const TAIL_MARGIN_S = 2.0;
+
+/** 基于组索引生成伪随机但确定性的场景缩放（取 animation-config GROUP_SCALE_RANGE 区间） */
+function computeSceneScale(index: number): number {
+  const hash = (((index + 1) * 2654435761) >>> 0) % 1000;
+  return GROUP_SCALE_RANGE.min + (hash / 1000) * (GROUP_SCALE_RANGE.max - GROUP_SCALE_RANGE.min);
+}
 
 interface Group {
   items: BubbleData[];
@@ -59,10 +75,12 @@ interface Group {
   end: number;
   /** 是否为 Hero 独占组（单条气泡炸屏） */
   hero: boolean;
+  /** 本组场景缩放系数，不同组取不同值产生推拉镜头感 */
+  sceneScale: number;
 }
 
 /**
- * 把带时间戳的气泡切成每组 1~3 条。
+ * 把带时间戳的气泡切成每组 1~4 条。
  *
  * Hero 判定：分组后天然只有 1 条气泡的组（孤立句，前后有留白，本就没有对话感）
  * 直接标记为 Hero —— 渲染时独占全屏放大，套用更猛的入场/退场和全屏光效。
@@ -87,6 +105,7 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
       start: cur[0].startFrame ?? 0,
       end: totalFrames,
       hero: cur.length === 1,
+      sceneScale: 0, // 兜底，结尾统一赋值
     });
     cur = [];
   };
@@ -127,12 +146,14 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
           start: main[0].startFrame ?? g.start,
           end: totalFrames,
           hero: false,
+          sceneScale: 0, // 兜底，结尾统一赋值
         });
         out.push({
           items: [last],
           start: last.startFrame ?? g.start,
           end: totalFrames,
           hero: true,
+          sceneScale: 0, // 兜底，结尾统一赋值
         });
         sinceHero = 0;
       } else {
@@ -144,9 +165,12 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
     groups.push(...out);
   }
 
-  // 每组一直留到下一组进场为止
+  // 每组一直留到下一组进场为止；
+  // 最后一组延长 TAIL_MARGIN_S，防止音频实际时长超出预期时动画被截断。
+  const tailFrames = Math.round(TAIL_MARGIN_S * fps);
   for (let i = 0; i < groups.length; i += 1) {
-    groups[i].end = i + 1 < groups.length ? groups[i + 1].start : totalFrames;
+    groups[i].end = i + 1 < groups.length ? groups[i + 1].start : totalFrames + tailFrames;
+    groups[i].sceneScale = computeSceneScale(i);
   }
   return groups;
 }
@@ -154,11 +178,12 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
 /** 一组气泡（含各自入场 + 退场）。Hero 组独占全屏放大炸屏，普通组多条同屏对话。 */
 const BubbleGroup: React.FC<{
   group: Group;
+  groupIndex: number;
   frame: number;
   fps: number;
   beats: number[];
   genre?: string;
-}> = ({ group, frame, fps, beats, genre }) => {
+}> = ({ group, groupIndex, frame, fps, beats, genre }) => {
   // 动态退场时长：组停留越久退场动作越舒展，密集时更利落
   const groupSpan = Math.max(group.end - group.start, 1);
   const exitFrames = dynamicExitFrames(Math.min(groupSpan, fps * 1.4));
@@ -177,16 +202,23 @@ const BubbleGroup: React.FC<{
     const energy = beatEnergy(start, beats, fps, 4);
     const seed = item.index * 7 + (item.subIndex || 0);
     const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
-    const motion = enterMotion(pickHeroVariant(seed), raw, side, energy);
+    // Hero 高潮时刻：2-3 个入场动画组合叠加，炸屏更猛
+    const heroCombo = pickHeroCombo(groupIndex);
+    const comboMotion = comboEnterMotion(heroCombo, raw, side);
 
-    // Hero 放大倍数：原1.35 配合退场峰值 1.6，叠加后气泡+头像必然冲出1080px 画布边缘，
-    // 这里降到 1.18，并配合下方 alignItems:'center' + 气泡收窄，把安全余量留出来
-    const heroScale = 1.18;
-    const exit = heroExitMotion(exitRaw);
+    // Hero 放大倍数：叠加场景缩放系数，让每个 Hero 组也有不同的推拉感
+    const effectiveHeroScale = 1.18 * group.sceneScale;
+    const heroExitVariant = pickHeroExitVariant(groupIndex);
+    // 确保气泡不在歌词唱完前退场：以气泡 endFrame 为退场下限
+    const heroBubbleEnd = item.endFrame ?? group.end;
+    const heroExitStart = Math.max(group.end - exitFrames, heroBubbleEnd);
+    const heroExitRaw = frame > heroExitStart ? (frame - heroExitStart) / exitFrames : 0;
+    const exit = exitMotionVariant(heroExitVariant, heroExitRaw, side, CANVAS_WIDTH, CANVAS_HEIGHT, true);
 
-    const combinedOpacity = motion.opacity * exit.opacity;
-    // 入场完成后保持静止：不叠加逐帧的节拍呼吸，避免气泡出现后又被 beat 顶得跳一下
-    const combinedTransform = `${motion.transform} scale(${heroScale.toFixed(4)}) ${exit.transform}`;
+    const combinedOpacity = comboMotion.opacity * exit.opacity;
+    const motionTransform = comboMotion.transform || '';
+    const combinedTransform = `${motionTransform} scale(${effectiveHeroScale.toFixed(4)}) ${exit.transform}`;
+    const combinedFilter = [comboMotion.filter, exit.filter].filter(Boolean).join(' ') || undefined;
 
     return (
       <AbsoluteFill>
@@ -196,29 +228,31 @@ const BubbleGroup: React.FC<{
             flexDirection: 'column',
             justifyContent: 'center',
             alignItems: 'center',
-            padding: '0 80px',
+            padding: '0 140px',
             opacity: combinedOpacity,
             transform: combinedTransform,
             transformOrigin: 'center center',
-            filter: [motion.filter, exit.filter].filter(Boolean).join(' ') || undefined,
+            filter: combinedFilter,
             willChange: 'transform, opacity, filter',
           }}
         >
-          {/* Hero 模式气泡整体会被再放大 ~1.18 倍，提前把气泡最大宽度收窄到 75%，
+          {/* Hero 模式气泡整体会被再放大 ~1.18 倍，提前把气泡最大宽度收窄到 65%，
               为放大动画预留安全边距，避免贴着 1080px 画布边缘的气泡被推出屏幕 */}
-          <ChatBubble data={item} maxWidthScale={0.75} />
+          <ChatBubble data={item} maxWidthScale={0.65} />
         </AbsoluteFill>
       </AbsoluteFill>
     );
   }
 
-  // ── 普通组：多条同屏对话 + 个体快闪退场 ────────────────────────────
+  // ── 普通组：多条同屏对话 + 场景缩放，每条气泡独立入场/退场变体 ────────────────────
   return (
     <AbsoluteFill
       style={{
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
+        transform: `scale(${group.sceneScale.toFixed(4)})`,
+        transformOrigin: 'center center',
         willChange: 'transform, opacity, filter',
       }}
     >
@@ -249,10 +283,12 @@ const BubbleGroup: React.FC<{
         const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
         const motion = enterMotion(pickVariantForGenre(seed, genre), raw, side, energy);
 
-        // 入场结束后保持静止：这里曾叠加逐帧的 beatEnergy 呼吸缩放，但配合
-        // 0.5s 提前入场后，气泡早已静止，歌词起唱时的 beat 会孤立地把它顶得跳一下。
-        // 个体快闪退场：整组退场窗口内同步触发，制造卡点快切
-        const indivExit = bubbleFlashExit(exitRaw);
+        // 每条气泡独立退场时机：确保不早于本条歌词唱完
+        const bubbleEndFrame = item.endFrame ?? group.end;
+        const perBubbleExitStart = Math.max(group.end - exitFrames, bubbleEndFrame);
+        const perBubbleExitRaw = frame > perBubbleExitStart ? (frame - perBubbleExitStart) / exitFrames : 0;
+        const perBubbleExitVariant = pickExitVariant(groupIndex + idx * 3);
+        const indivExit = exitMotionVariant(perBubbleExitVariant, perBubbleExitRaw, side, CANVAS_WIDTH, CANVAS_HEIGHT);
 
         const combinedOpacity = motion.opacity * indivExit.opacity;
         const combinedTransform = `${motion.transform} ${indivExit.transform}`;
@@ -331,16 +367,14 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath, b
 
       {audioPath ? <Audio src={audioPath} /> : null}
 
-      {/* 舞台：固定缩放，不随节拍呼吸（避免气泡入场完成后被beat 顶得整体跳动） */}
+      {/* 舞台：不再使用固定全局缩放，各组按自己的 sceneScale 独立渲染，切换时产生推拉镜头感 */}
       <AbsoluteFill
         style={{
-          padding: '38px 60px',
-          transform: 'scale(0.8)',
-          transformOrigin: '50% 50%',
+          padding: '60px 120px',
         }}
       >
         {rendered.map(({ g, i }) => (
-          <BubbleGroup key={i} group={g} frame={frame} fps={fps} beats={beatFrames} genre={genre} />
+          <BubbleGroup key={i} groupIndex={i} group={g} frame={frame} fps={fps} beats={beatFrames} genre={genre} />
         ))}
       </AbsoluteFill>
 

@@ -14,6 +14,13 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const db = cloud.database();
 const $ = db.command;
 
+function formatDuration(seconds) {
+  const total = Math.floor(Number(seconds) || 0);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 exports.main = async (event) => {
   const wxContext = cloud.getWXContext();
   const openid = wxContext.OPENID || 'mock-user';
@@ -38,7 +45,7 @@ exports.main = async (event) => {
       taskId: item.taskId || '',
       title: item.title,
       videoUrl: item.videoUrl,
-      duration: `00:${String(item.duration || 0).padStart(2, '0')}`,
+      duration: formatDuration(item.duration || 0),
       createdAt: item.createdAt,
       status: 'completed',
       progress: 100,

@@ -21,6 +21,12 @@ exports.main = async (event) => {
 
   try {
     if (type === 'work') {
+      // 所有权校验：只能删除自己的作品
+      const workDoc = await db.collection('works').doc(id).get();
+      if (!workDoc.data || workDoc.data.userId !== openid) {
+        return { success: false, message: '无权操作此作品' };
+      }
+
       // 删除 works 集合记录
       await db.collection('works').doc(id).remove();
 
@@ -33,6 +39,12 @@ exports.main = async (event) => {
         }
       }
     } else if (type === 'task') {
+      // 所有权校验：只能删除自己的任务
+      const taskDoc = await db.collection('tasks').doc(id).get();
+      if (!taskDoc.data || taskDoc.data.userId !== openid) {
+        return { success: false, message: '无权操作此任务' };
+      }
+
       // 删除 tasks 集合记录
       await db.collection('tasks').doc(id).remove();
     } else {

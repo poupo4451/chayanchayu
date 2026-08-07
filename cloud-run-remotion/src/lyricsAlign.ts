@@ -586,6 +586,20 @@ export function computeBubbleTimings(params: {
     if (frames[i] < frames[i - 1] + MIN_GAP_FRAMES) frames[i] = frames[i - 1] + MIN_GAP_FRAMES;
   }
 
+  // 3.5) 【硬性规则】歌词没唱完，气泡绝不提前出场：
+  // 每条锚定了歌词行的气泡，startFrame 不得早于歌词起唱帧。
+  // 防止未锚定的插值气泡跑到关联歌词行之前。
+  for (let i = 0; i < bubbles.length; i += 1) {
+    const sub = getSubSpan(bubbles[i]);
+    if (!sub) continue;
+    const minFrame = clampFrame(sub.startS * fps);
+    if (frames[i] < minFrame) frames[i] = minFrame;
+  }
+  // 重新确保单调性（clamp 后可能打乱顺序）
+  for (let i = 1; i < frames.length; i += 1) {
+    if (frames[i] < frames[i - 1] + MIN_GAP_FRAMES) frames[i] = frames[i - 1] + MIN_GAP_FRAMES;
+  }
+
   // 4) endFrame：优先用歌词唱完的时间，但不越过下一个气泡
   const out = bubbles.map((b, i) => {
     const sub = getSubSpan(b);

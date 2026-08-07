@@ -4,6 +4,7 @@ FROM node:18-slim
 # fonts-noto-color-emoji：红包 🧧 等 emoji 否则会渲染成豆腐块
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
+    ffmpeg \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     fonts-noto-color-emoji \

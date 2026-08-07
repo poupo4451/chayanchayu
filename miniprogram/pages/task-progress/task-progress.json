@@ -1,6 +1,6 @@
 {
   "navigationBarTitleText": "生成进度",
-  "navigationBarBackgroundColor": "#1A1625",
-  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#FFFFFF",
+  "navigationBarTextStyle": "black",
   "usingComponents": {}
 }

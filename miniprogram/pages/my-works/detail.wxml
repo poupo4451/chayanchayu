@@ -1,4 +1,4 @@
-<view class="detail-page">
+<view class="detail-page" bindlongpress="onLongPress">
   <view class="back-btn" style="top: {{safeTop}}px;" bindtap="onBack">
     <text class="back-icon">‹</text>
   </view>
@@ -32,7 +32,9 @@
       show-fullscreen-btn="{{false}}"
       show-casting-button="{{false}}"
       show-mute-btn="{{false}}"
+      show-center-play-btn="{{false}}"
       enable-progress-gesture="{{false}}"
+      show-download-btn="{{true}}"
       bindtap="onVideoTap"
       bindplay="onPlay"
       bindpause="onPause"
@@ -60,12 +62,15 @@
           min="0"
           max="100"
           block-size="11"
-          activeColor="#FF2D78"
+          activeColor="#00B865"
           backgroundColor="rgba(255,255,255,0.3)"
           bindchanging="onSeekChange"
           bindchange="onSeekChange"
         />
         <text class="time-text">{{durationText}}</text>
+        <view class="save-btn" bindtap="onSaveVideo">
+          <text>⬇</text>
+        </view>
       </view>
     </view>
   </block>

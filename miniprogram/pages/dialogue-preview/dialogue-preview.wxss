@@ -14,8 +14,10 @@
   bottom: 0;
   display: flex;
   padding: 20rpx 40rpx 40rpx;
-  background: var(--bg-deep);
+  background: #FFFFFF;
   box-sizing: border-box;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4rpx 16rpx rgba(0, 0, 0, 0.04);
 }
 
 .btn-outline {
@@ -25,10 +27,11 @@
   height: 88rpx;
   padding: 0 30rpx;
   border-radius: 44rpx;
-  border: 1px solid rgba(255,255,255,0.2);
-  color: #fff;
+  border: 1px solid var(--primary);
+  color: var(--primary);
   font-size: 14px;
   margin-right: 20rpx;
+  background: transparent;
 }
 
 .flex-1 {

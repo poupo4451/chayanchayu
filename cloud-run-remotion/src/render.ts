@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import { execSync } from 'child_process';
 import axios from 'axios';
 import { bundle } from '@remotion/bundler';
 import { selectComposition, renderMedia } from '@remotion/renderer';
@@ -243,6 +244,37 @@ export async function getTaskVideoUrl(taskId: string): Promise<{ fileId: string;
   return { fileId, url };
 }
 
+/**
+ * 用 ffprobe 获取音频文件的实际时长（秒）。
+ * 应对 Suno API 上报的 duration 可能不准确的问题：
+ *   - 实际音频比上报的更长 → 气泡动画提前结束
+ *   - 实际音频比上报的更短 → 动画拉到结尾有空白
+ * 返回实际时长；ffprobe 不可用时返回 null。
+ */
+async function getActualAudioDuration(audioPath: string): Promise<number | null> {
+  try {
+    // http URL 需要先下载到临时文件
+    let filePath = audioPath;
+    let shouldCleanup = false;
+    if (audioPath.startsWith('http://') || audioPath.startsWith('https://')) {
+      const tmp = path.join('/tmp', `audio_${Date.now()}.mp3`);
+      const resp = await axios.get(audioPath, { responseType: 'arraybuffer', timeout: 60000 });
+      fs.writeFileSync(tmp, Buffer.from(resp.data));
+      filePath = tmp;
+      shouldCleanup = true;
+    }
+    const stdout = execSync(
+      `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${filePath}"`,
+      { timeout: 30000 },
+    );
+    if (shouldCleanup) { try { fs.unlinkSync(filePath); } catch { /* ignore */ } }
+    const dur = parseFloat(stdout.toString().trim());
+    return Number.isFinite(dur) && dur > 0 ? dur : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function renderTask(taskId: string): Promise<void> {
   console.log(`starting render for task ${taskId}`);
   await setStage(taskId, 'starting', 80);
@@ -257,7 +289,31 @@ export async function renderTask(taskId: string): Promise<void> {
 
     const bubbles: BubbleData[] = task.screenshots || [];
     const audioUrl: string = task.audioUrl || '';
-    const audioDuration: number = task.audioDuration || 30;
+    const storedDuration: number = task.audioDuration || 30;
+
+    // 🔑 核心修复：Suno API 上报的 duration 可能不准确，
+    // 用 ffprobe 获取音频文件的实际时长，防止动画提前停止。
+    let audioDuration = storedDuration;
+    if (audioUrl) {
+      const actual = await getActualAudioDuration(audioUrl);
+      if (actual != null && Math.abs(actual - storedDuration) > 1.5) {
+        console.log(
+          `⚠️ audio duration mismatch: task says ${storedDuration}s, ffprobe says ${actual}s — using actual`,
+        );
+        audioDuration = actual;
+        // 回写到 task 表，下次渲染直接用对的时长
+        await db.collection('tasks').doc(taskId).update({
+          audioDuration: actual,
+          audioDurationCorrected: true,
+        });
+      } else if (actual != null) {
+        console.log(`✓ audio duration verified: ${actual}s (stored: ${storedDuration}s)`);
+      } else {
+        console.log(`⚠️ ffprobe failed, falling back to stored duration: ${storedDuration}s`);
+      }
+    } else {
+      console.log(`⚠️ no audioUrl, using stored duration: ${storedDuration}s`);
+    }
 
     if (bubbles.length === 0) {
       throw new Error('no screenshots data found');

@@ -14,6 +14,9 @@
     <text wx:else>{{line.name ? line.name[0] : '茶'}}</text>
   </view>
   <image wx:if="{{stickerSrc}}" class="bubble-image" src="{{stickerSrc}}" mode="aspectFill" binderror="onStickerError" />
+  <view wx:elif="{{stickerLoading}}" class="bubble-image bubble-image-fallback">
+    <text>加载中...</text>
+  </view>
   <view wx:else class="bubble-image bubble-image-fallback">
     <text>表情包</text>
   </view>

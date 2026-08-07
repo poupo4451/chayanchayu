@@ -1,13 +1,14 @@
 .hero {
   margin-top: 20rpx;
   margin-bottom: 40rpx;
-  background: linear-gradient(135deg, rgba(255,45,120,0.25) 0%, rgba(124,58,237,0.25) 100%);
+  background: linear-gradient(135deg, rgba(0, 184, 101, 0.1) 0%, rgba(0, 154, 85, 0.05) 100%);
 }
 
 .section-title {
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 20rpx;
+  color: var(--text-main);
 }
 
 .case-scroll {
@@ -26,14 +27,14 @@
   width: 320rpx;
   height: 200rpx;
   border-radius: 20rpx;
-  background: linear-gradient(135deg, #FF2D78 0%, #7C3AED 100%);
+  background: linear-gradient(135deg, #00B865 0%, #009A55 100%);
   margin-bottom: 12rpx;
 }
 
 .case-title {
   display: block;
   font-size: 14px;
-  color: #fff;
+  color: var(--text-main);
   margin-bottom: 6rpx;
 }
 
@@ -54,9 +55,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 44rpx;
-  background: linear-gradient(135deg, #FF2D78 0%, #FFB800 100%);
-  color: #fff;
+  background: linear-gradient(135deg, #00B865 0%, #009A55 100%);
+  color: #FFFFFF;
   font-size: 16px;
   font-weight: 600;
-  box-shadow: 0 8rpx 24rpx rgba(255, 45, 120, 0.4);
+  box-shadow: 0 8rpx 24rpx rgba(0, 184, 101, 0.35);
 }

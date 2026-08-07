@@ -1,6 +1,23 @@
 <view class="page works-page" style="padding-top: {{safeTop}}px;">
   <text class="page-title">我的作品</text>
 
+  <!-- 用户信息区 -->
+  <view class="profile-card card">
+    <button class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+      <image class="profile-avatar" src="{{userProfile.avatarUrl || '/images/default-avatar.png'}}" mode="aspectFill" />
+    </button>
+    <view class="profile-info">
+      <input
+        class="profile-nickname"
+        type="nickname"
+        placeholder="点击设置昵称"
+        value="{{userProfile.nickName}}"
+        bindblur="onNicknameBlur"
+      />
+      <text class="profile-count">共 {{works.length}} 个作品</text>
+    </view>
+  </view>
+
   <block wx:if="{{loading}}">
     <text class="text-sub">加载中…</text>
   </block>
@@ -39,7 +56,10 @@
             <text class="work-status-badge work-status-badge-{{item.status}}">{{item.statusLabel}}</text>
             <text class="work-status-progress">{{item.progress}}%</text>
           </view>
-          <text wx:else class="work-duration">{{item.duration}}</text>
+          <view wx:else class="work-meta-row">
+            <text class="work-duration">{{item.duration}}</text>
+            <text class="work-time">{{item.createdAtText}}</text>
+          </view>
         </view>
       </view>
     </view>

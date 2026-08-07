@@ -2,18 +2,17 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Player, type PlayerRef } from '@remotion/player';
 import { PreviewRoot } from './PreviewRoot';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from '@remotion-components/wxTheme';
-import { demoBubbles, demoBeats, FPS, DURATION_FRAMES, DURATION_SEC } from './mock/demoBubbles';
-
-/** 可切换的流派，影响气泡入场动画池（见 gsapMotion.GENRE_VARIANT_POOLS） */
-const GENRES = ['嘻哈', '抖音风', '粤语说唱', '流行', 'R&B', '随机'] as const;
+import { DEMO_PRESETS, FPS, DURATION_FRAMES, DURATION_SEC } from './mock/demoPresets';
 
 const App: React.FC = () => {
   const playerRef = useRef<PlayerRef>(null);
-  const [genre, setGenre] = useState<string>('嘻哈');
+  const [presetIdx, setPresetIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [frame, setFrame] = useState(0);
 
-  // 订阅播放器事件，同步播放状态与当前帧
+  const current = DEMO_PRESETS[presetIdx] ?? DEMO_PRESETS[0];
+
+  // 订阅播放器事件
   useEffect(() => {
     const p = playerRef.current;
     if (!p) return;
@@ -25,8 +24,6 @@ const App: React.FC = () => {
     p.addEventListener('play', onPlay);
     p.addEventListener('pause', onPause);
     p.addEventListener('frameupdate', onFrame);
-
-    //挂载后自动播放
     p.play();
 
     return () => {
@@ -34,7 +31,7 @@ const App: React.FC = () => {
       p.removeEventListener('pause', onPause);
       p.removeEventListener('frameupdate', onFrame);
     };
-  }, []);
+  }, [presetIdx]);
 
   const toggle = () => {
     const p = playerRef.current;
@@ -49,33 +46,52 @@ const App: React.FC = () => {
     p.play();
   };
 
+  const switchPreset = (idx: number) => {
+    setPresetIdx(idx);
+    // 切预设后自动从头播
+    const p = playerRef.current;
+    if (p) {
+      setTimeout(() => {
+        p.seekTo(0);
+        p.play();
+      }, 0);
+    }
+  };
+
   const seconds = (frame / FPS).toFixed(1);
 
   return (
     <div className="app">
       <header className="topbar">
         <h1>
-          茶言茶曲<span>动画预览</span>
+          茶言茶曲 <span>动画预览</span>
         </h1>
-        <div className="genre-picker">
-          {GENRES.map((g) => (
+        <div className="preset-picker">
+          {DEMO_PRESETS.map((pre, i) => (
             <button
-              key={g}
-              className={`genre-btn ${genre === g ? 'active' : ''}`}
-              onClick={() => setGenre(g)}
+              key={pre.id}
+              className={`preset-btn ${presetIdx === i ? 'active' : ''}`}
+              onClick={() => switchPreset(i)}
+              title={pre.desc}
             >
-              {g}
+              {pre.label}
             </button>
           ))}
         </div>
       </header>
+
+      <p className="preset-desc">{current.desc} — {current.genre}</p>
 
       <main className="stage">
         <div className="phone">
           <Player
             ref={playerRef}
             component={PreviewRoot}
-            inputProps={{ bubbles: demoBubbles, beats: demoBeats, genre }}
+            inputProps={{
+              bubbles: current.bubbles,
+              beats: current.beats,
+              genre: current.genre,
+            }}
             durationInFrames={DURATION_FRAMES}
             compositionWidth={CANVAS_WIDTH}
             compositionHeight={CANVAS_HEIGHT}
@@ -101,12 +117,12 @@ const App: React.FC = () => {
           />
         </div>
         <span className="timecode">
-          {seconds}s / {DURATION_SEC}s ·帧 {frame}
+          {seconds}s / {DURATION_SEC}s · 帧 {frame}
         </span>
       </footer>
 
       <p className="hint">
-        修改 <code>cloud-run-remotion/src/remotion/animation-config.ts</code> 后此处自动热更新
+        修改 <code>cloud-run-remotion/src/remotion/animation-config.ts</code> 后热更新
       </p>
     </div>
   );

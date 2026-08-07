@@ -75,6 +75,16 @@ function deleteWork({ id, type, videoUrl }) {
   return callFunction('deleteWork', { id, type, videoUrl });
 }
 
+/** 获取当前用户资料 */
+function getUserProfile() {
+  return callFunction('getUserProfile', {});
+}
+
+/** 更新用户头像/昵称 */
+function updateUserProfile({ nickName, avatarUrl }) {
+  return callFunction('updateUserProfile', { nickName, avatarUrl });
+}
+
 module.exports = {
   callFunction,
   createTask,
@@ -88,4 +98,6 @@ module.exports = {
   startNotifyAndFinalize,
   getWorksList,
   deleteWork,
+  getUserProfile,
+  updateUserProfile,
 };

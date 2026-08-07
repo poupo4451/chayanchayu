@@ -21,10 +21,18 @@ exports.main = async (event) => {
     return { success: false, message: '缺少 taskId 参数' };
   }
 
+  const wxContext = cloud.getWXContext();
+  const openid = wxContext.OPENID || '';
+
   try {
     const tasksCol = db.collection('tasks');
     const res = await tasksCol.doc(taskId).get();
     const task = res.data;
+
+    // 所有权校验：只能查看自己的任务
+    if (!task || task.userId !== openid) {
+      return { success: false, message: '无权查看此任务' };
+    }
 
     return {
       success: true,

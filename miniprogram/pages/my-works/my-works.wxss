@@ -13,6 +13,78 @@
   padding-top: 200rpx;
 }
 
+/* ===== 用户信息区 ===== */
+
+.profile-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 28rpx 30rpx;
+  margin-bottom: 30rpx;
+}
+
+.avatar-btn {
+  width: 120rpx;
+  height: 120rpx;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.avatar-btn::after {
+  border: none;
+}
+
+.profile-avatar {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  overflow: hidden;
+  display: block;
+}
+
+.profile-avatar-empty {
+  background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-avatar-text {
+  font-size: 48rpx;
+  line-height: 1;
+}
+
+.profile-info {
+  display: flex;
+  flex-direction: column;
+  margin-left: 24rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-nickname {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-main);
+  height: 48rpx;
+  line-height: 48rpx;
+  padding: 0;
+  margin-bottom: 8rpx;
+  background: transparent;
+}
+
+.profile-count {
+  font-size: 13px;
+  color: var(--text-sub);
+}
+
+/* ===== 作品卡片 ===== */
+
 .work-card {
   display: flex;
   flex-direction: row;
@@ -53,14 +125,14 @@
 .swipe-content {
   position: relative;
   z-index: 1;
-  background: var(--card-bg, #1a1523);
+  background: var(--bg-card, #FFFFFF);
 }
 
 .work-cover {
   width: 160rpx;
   height: 100rpx;
   border-radius: 16rpx;
-  background: linear-gradient(135deg, #FF2D78 0%, #7C3AED 100%);
+  background: linear-gradient(135deg, #00B865 0%, #009A55 100%);
   margin-right: 20rpx;
   flex-shrink: 0;
   display: flex;
@@ -86,17 +158,33 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
 }
 
 .work-title {
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 8rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .work-duration {
   font-size: 12px;
   color: var(--text-sub);
+}
+
+.work-time {
+  font-size: 12px;
+  color: var(--text-hint);
+}
+
+.work-meta-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16rpx;
 }
 
 .work-status-row {
@@ -109,8 +197,8 @@
   font-size: 11px;
   padding: 4rpx 14rpx;
   border-radius: 999px;
-  background: rgba(255, 45, 120, 0.16);
-  color: #FF6FA0;
+  background: rgba(0, 184, 101, 0.12);
+  color: #00B865;
 }
 
 .work-status-badge-failed {
