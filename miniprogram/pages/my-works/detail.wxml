@@ -25,7 +25,7 @@
       id="workVideo"
       class="fullscreen-video"
       src="{{work.playUrl}}"
-      object-fit="cover"
+      object-fit="contain"
       autoplay
       loop="{{false}}"
       controls="{{false}}"
@@ -69,7 +69,7 @@
         />
         <text class="time-text">{{durationText}}</text>
         <view class="save-btn" bindtap="onSaveVideo">
-          <text>⬇</text>
+          <view class="download-arrow"></view>
         </view>
       </view>
     </view>

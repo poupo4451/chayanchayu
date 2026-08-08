@@ -21,9 +21,13 @@ exports.main = async (event) => {
 
   try {
     if (type === 'work') {
-      // 所有权校验：只能删除自己的作品
+      // 所有权校验：检查 userId 或 _openid
       const workDoc = await db.collection('works').doc(id).get();
-      if (!workDoc.data || workDoc.data.userId !== openid) {
+      if (!workDoc.data) {
+        return { success: false, message: '作品不存在' };
+      }
+      const ownerId = workDoc.data.userId || workDoc.data._openid || '';
+      if (ownerId && ownerId !== openid) {
         return { success: false, message: '无权操作此作品' };
       }
 
@@ -39,9 +43,13 @@ exports.main = async (event) => {
         }
       }
     } else if (type === 'task') {
-      // 所有权校验：只能删除自己的任务
+      // 所有权校验：检查 userId 或 _openid
       const taskDoc = await db.collection('tasks').doc(id).get();
-      if (!taskDoc.data || taskDoc.data.userId !== openid) {
+      if (!taskDoc.data) {
+        return { success: false, message: '任务不存在' };
+      }
+      const ownerId = taskDoc.data.userId || taskDoc.data._openid || '';
+      if (ownerId && ownerId !== openid) {
         return { success: false, message: '无权操作此任务' };
       }
 
@@ -53,7 +61,7 @@ exports.main = async (event) => {
 
     return { success: true, data: { id, type } };
   } catch (e) {
-    console.error('deleteWork error', e);
+    console.error('deleteWork error', e.message, e.stack);
     return { success: false, message: e.message || '删除失败' };
   }
 };

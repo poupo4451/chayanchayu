@@ -11,21 +11,77 @@ const STAGE_LABELS = {
   failed: '生成失败',
 };
 
-const DELETE_WIDTH = 70; // 删除按钮宽度（140rpx / 2，rpx→px 近似）
+const DELETE_WIDTH = 72; // 滑动距离（64rpx按钮 + 48rpx右间距 + 卡片间距 ≈ 72px）
 
 function encodeQueryValue(value) {
   return encodeURIComponent(value == null ? '' : String(value));
 }
 
+function formatDuration(duration) {
+  if (duration == null || duration === '') return '00:00';
+
+  // 先尝试当数字 / 数字字符串处理
+  let totalSeconds = 0;
+  const num = Number(duration);
+  if (!isNaN(num) && num > 0) {
+    totalSeconds = num;
+  } else {
+    // 解析 "MM:SS" 或 "HH:MM:SS" — 统一转成总秒数
+    const parts = String(duration).split(':');
+    if (parts.length === 2) {
+      totalSeconds = (parseFloat(parts[0]) || 0) * 60 + (parseFloat(parts[1]) || 0);
+    } else if (parts.length >= 3) {
+      totalSeconds =
+        (parseFloat(parts[0]) || 0) * 3600 +
+        (parseFloat(parts[1]) || 0) * 60 +
+        (parseFloat(parts[2]) || 0);
+    }
+  }
+
+  const total = Math.floor(totalSeconds);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+const WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
 function formatTime(timestamp) {
   if (!timestamp) return '';
   const d = new Date(timestamp);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const h = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-  return `${y}-${m}-${day} ${h}:${min}`;
+  const now = new Date();
+  const today = startOfDay(now);
+  const target = startOfDay(d);
+  const diffDays = Math.round((today - target) / 86400000);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const hm = `${hh}:${mm}`;
+  const M = d.getMonth() + 1;
+  const D = d.getDate();
+  const Y = d.getFullYear();
+
+  // 当天
+  if (diffDays === 0) return hm;
+  // 昨天
+  if (diffDays === 1) return `昨天 ${hm}`;
+  // 最近7天内（不含今天和昨天，1-6天前）
+  if (diffDays > 1 && diffDays < 7) return `${WEEK_LABELS[d.getDay()]} ${hm}`;
+  // 同一年内
+  if (Y === now.getFullYear()) return `${M}/${D} ${hm}`;
+  // 不同年份
+  return `${Y}/${M}/${D}`;
 }
 
 Page({
@@ -33,6 +89,7 @@ Page({
     works: [],
     loading: true,
     safeTop: 60,
+    nicknameFocus: false,
     userProfile: {
       nickName: '',
       avatarUrl: '',
@@ -70,9 +127,19 @@ Page({
           },
         });
       }
+      // 无昵称时自动聚焦，方便用户获取微信昵称
+      if (!profile || !profile.nickName) {
+        this.setData({ nicknameFocus: true });
+      }
     } catch (e) {
       console.warn('加载用户资料失败', e);
+      this.setData({ nicknameFocus: true });
     }
+  },
+
+  onNicknameFocus() {
+    // 用户点击了 type="nickname" 输入框，微信会自动展示昵称候选
+    this.setData({ nicknameFocus: false });
   },
 
   onChooseAvatar(e) {
@@ -121,6 +188,7 @@ Page({
         ...item,
         statusLabel: item.type === 'task' ? (STAGE_LABELS[item.status] || '进行中') : '',
         createdAtText: formatTime(item.createdAt),
+        durationText: formatDuration(item.duration),
         swipeX: 0,
       }));
       this.setData({ works });
@@ -240,6 +308,17 @@ Page({
 
     const { id } = work;
     if (work.type === 'task') {
+      // 仍在对话预览阶段 → 回到对话预览页继续编辑/确认
+      if (work.status === 'pending' || work.status === 'generating_dialogue') {
+        wx.navigateTo({
+          url: `/pages/dialogue-preview/dialogue-preview?taskId=${encodeQueryValue(work.taskId)}`,
+          fail: (err) => {
+            console.error('open dialogue-preview failed', err);
+            wx.showToast({ title: '打开对话预览失败', icon: 'none' });
+          },
+        });
+        return;
+      }
       wx.navigateTo({
         url: `/pages/task-progress/task-progress?taskId=${encodeQueryValue(work.taskId)}`,
         fail: (err) => {

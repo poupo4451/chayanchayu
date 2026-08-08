@@ -2,18 +2,23 @@
   <text class="page-title">我的作品</text>
 
   <!-- 用户信息区 -->
-  <view class="profile-card card">
-    <button class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+  <view class="profile-card">
+    <view class="avatar-wrapper">
       <image class="profile-avatar" src="{{userProfile.avatarUrl || '/images/default-avatar.png'}}" mode="aspectFill" />
-    </button>
+      <button class="avatar-btn-overlay" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar" plain="true" />
+    </view>
     <view class="profile-info">
-      <input
-        class="profile-nickname"
-        type="nickname"
-        placeholder="点击设置昵称"
-        value="{{userProfile.nickName}}"
-        bindblur="onNicknameBlur"
-      />
+      <view class="profile-nickname-row">
+        <input
+          class="profile-nickname"
+          type="nickname"
+          placeholder="轻触填入微信昵称"
+          value="{{userProfile.nickName}}"
+          focus="{{nicknameFocus}}"
+          bindfocus="onNicknameFocus"
+          bindblur="onNicknameBlur"
+        />
+      </view>
       <text class="profile-count">共 {{works.length}} 个作品</text>
     </view>
   </view>
@@ -28,18 +33,18 @@
   </block>
   <block wx:else>
     <view class="swipe-item" wx:for="{{works}}" wx:key="id">
-      <!-- 删除按钮（固定在右侧，滑动后才可见） -->
+      <!-- 删除按钮（卡片后方，左滑后可见） -->
       <view
         class="swipe-delete"
-        style="opacity: {{item.swipeX < 0 ? 1 : 0}};"
+        style="opacity: {{item.swipeX < -20 ? 1 : 0}};"
         catchtap="onDeleteConfirm"
         data-index="{{index}}"
       >
-        <text class="swipe-delete-icon">🗑</text>
+        <text class="swipe-delete-icon">✕</text>
       </view>
-      <!-- 卡片内容（可滑动） -->
+      <!-- 整张卡片（可滑动） -->
       <view
-        class="swipe-content work-card card {{item.type === 'task' ? 'work-card-pending' : ''}}"
+        class="swipe-card-wrap"
         style="transform: translateX({{item.swipeX}}px); transition: {{touching ? 'none' : 'transform 0.25s ease'}};"
         data-index="{{index}}"
         bindtouchstart="onSwipeStart"
@@ -47,17 +52,25 @@
         bindtouchend="onSwipeEnd"
         catchtap="onOpenWork"
       >
-        <view class="work-cover">
-          <view wx:if="{{item.type === 'task'}}" class="work-cover-spinner"></view>
-        </view>
-        <view class="work-info">
-          <text class="work-title">{{item.title}}</text>
-          <view wx:if="{{item.type === 'task'}}" class="work-status-row">
-            <text class="work-status-badge work-status-badge-{{item.status}}">{{item.statusLabel}}</text>
-            <text class="work-status-progress">{{item.progress}}%</text>
+        <view class="work-card card {{item.type === 'task' ? 'work-card-pending' : ''}}">
+          <view class="work-cover">
+            <image
+              wx:if="{{item.type !== 'task'}}"
+              class="work-cover-img"
+              src="/images/work-cover-icon.svg"
+              mode="aspectFill"
+            />
+            <view wx:if="{{item.type === 'task'}}" class="work-cover-spinner"></view>
           </view>
-          <view wx:else class="work-meta-row">
-            <text class="work-duration">{{item.duration}}</text>
+          <view class="work-info">
+            <view class="work-header">
+              <text class="work-title">{{item.title}}</text>
+              <text wx:if="{{item.type !== 'task'}}" class="work-duration">{{item.durationText}}</text>
+              <view wx:if="{{item.type === 'task'}}" class="work-status-row">
+                <text class="work-status-badge work-status-badge-{{item.status}}">{{item.statusLabel}}</text>
+                <text class="work-status-progress">{{item.progress}}%</text>
+              </view>
+            </view>
             <text class="work-time">{{item.createdAtText}}</text>
           </view>
         </view>

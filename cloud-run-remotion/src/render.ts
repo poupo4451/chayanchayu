@@ -275,9 +275,55 @@ async function getActualAudioDuration(audioPath: string): Promise<number | null>
   }
 }
 
+/**
+ * 三级降级策略获取第一句歌词的起唱时间（秒）。
+ * 🥇 lyricsTimeline[0].startS — Suno 行级时间戳
+ * 🥈 lyricsWords[0].s — Suno 词级时间戳
+ * 🥉 第一个气泡 startFrame 反推 — 最后兜底
+ * 返回 null 表示没有可用的起唱时间数据。
+ */
+function getFirstLyricStartSeconds(
+  timeline?: LyricLine[],
+  words?: LyricWord[],
+  bubblesTimed?: BubbleData[],
+): number | null {
+  if (timeline && timeline.length > 0 && typeof timeline[0].startS === 'number' && timeline[0].startS > 0) {
+    return timeline[0].startS;
+  }
+  if (words && words.length > 0 && typeof words[0].s === 'number' && words[0].s > 0) {
+    return words[0].s;
+  }
+  if (bubblesTimed && bubblesTimed.length > 0 && typeof bubblesTimed[0].startFrame === 'number' && bubblesTimed[0].startFrame > 0) {
+    return bubblesTimed[0].startFrame / RENDER_FPS;
+  }
+  return null;
+}
+
+/**
+ * 用 ffmpeg 裁剪音频前奏，从 trimPoint 秒处截取到结束。
+ * 返回裁剪后的文件路径；失败返回 null，调用方应回退到原音频。
+ */
+function trimAudioIntro(audioPath: string, trimPoint: number): string | null {
+  try {
+    const trimmed = path.join('/tmp', `audio_trimmed_${Date.now()}.mp3`);
+    // -ss 在 -i 前面做 input seeking，速度快；-c copy 不重新编码
+    execSync(
+      `ffmpeg -y -ss ${trimPoint} -i "${audioPath}" -c copy "${trimmed}"`,
+      { timeout: 60000, stdio: 'pipe' },
+    );
+    console.log(`🎵 ffmpeg trim done: ${trimmed}`);
+    return trimmed;
+  } catch (e) {
+    console.warn('trimAudioIntro failed:', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
 export async function renderTask(taskId: string): Promise<void> {
   console.log(`starting render for task ${taskId}`);
   await setStage(taskId, 'starting', 80);
+
+  let trimmedAudioPath: string | null = null;
 
   try {
     const taskRes = await db.collection('tasks').doc(taskId).get();
@@ -340,16 +386,72 @@ export async function renderTask(taskId: string): Promise<void> {
     const bubblesTimed = timed.bubbles;
     console.log('lyrics alignment:', JSON.stringify(timed.report));
 
+    // ── 🎵 前奏裁剪：第一句歌词起唱太晚时，自动裁剪音频前奏 ─────────
+    const INTRO_TRIM_THRESHOLD = 2.0;   // 第一句歌词 ≥2s 才触发裁剪
+    const INTRO_ANIMATION_BUFFER = 0.5; // 入场动画缓冲
+    const INTRO_BREATHING_BUFFER = 0.3; // 呼吸感缓冲
+
+    const firstLyricStartS = getFirstLyricStartSeconds(
+      task.lyricsTimeline,
+      task.lyricsWords,
+      bubblesTimed,
+    );
+
+    let audioTrimApplied = false;
+
+    if (firstLyricStartS != null && firstLyricStartS >= INTRO_TRIM_THRESHOLD) {
+      const trimPoint = Math.max(0, firstLyricStartS - INTRO_ANIMATION_BUFFER - INTRO_BREATHING_BUFFER);
+      const frameOffset = Math.round(trimPoint * RENDER_FPS);
+
+      console.log(
+        `🎵 trimming intro: first lyric at ${firstLyricStartS.toFixed(1)}s, ` +
+        `trim point at ${trimPoint.toFixed(1)}s, offset ${frameOffset} frames`,
+      );
+
+      // 偏移所有气泡帧号
+      for (const b of bubblesTimed) {
+        b.startFrame = Math.max(0, (b.startFrame ?? 0) - frameOffset);
+        b.endFrame = Math.max((b.startFrame ?? 0) + 1, (b.endFrame ?? 0) - frameOffset);
+      }
+      // 偏移 beats（歌词起唱帧）
+      if (timed.beats && timed.beats.length > 0) {
+        timed.beats = timed.beats.map((f) => Math.max(0, f - frameOffset));
+      }
+
+      // 更新音频时长
+      audioDuration = Math.max(1, audioDuration - trimPoint);
+      audioTrimApplied = true;
+
+      console.log(
+        `🎵 after trim: audioDuration=${audioDuration.toFixed(1)}s, ` +
+        `first bubble startFrame=${bubblesTimed[0]?.startFrame}`,
+      );
+    }
+
     // Remotion 的 <Audio> 组件支持直接使用可访问的 http(s) URL，
     // 渲染器会下载并混入音轨。之前把音频下载到容器 /tmp 后传入本地绝对路径，
     // 会被 Remotion 的静态服务当成相对路径请求 localhost:3001/tmp/... 导致 404。
     let audioPath: string | null = null;
     if (audioUrl) {
       if (audioUrl.startsWith('http')) {
-        audioPath = audioUrl;
+        // 需要裁剪前奏时，必须先下载到本地才能用 ffmpeg 裁剪
+        audioPath = audioTrimApplied ? await downloadAudio(audioUrl) : audioUrl;
       } else {
         // cloud:// 等非 http 资源仍需下载到本地
         audioPath = await downloadAudio(audioUrl);
+      }
+
+      // 执行前奏裁剪
+      if (audioTrimApplied && audioPath && !audioPath.startsWith('http') && firstLyricStartS != null) {
+        const trimPoint = Math.max(0, firstLyricStartS - INTRO_ANIMATION_BUFFER - INTRO_BREATHING_BUFFER);
+        const trimmed = trimAudioIntro(audioPath, trimPoint);
+        if (trimmed) {
+          audioPath = trimmed;
+          trimmedAudioPath = trimmed;
+          console.log(`🎵 audio intro trimmed at ${trimPoint.toFixed(1)}s`);
+        } else {
+          console.warn('⚠️ audio trim failed, using original audio (intro will contain silence)');
+        }
       }
     }
     await setStage(taskId, 'audio_ready');
@@ -448,6 +550,7 @@ export async function renderTask(taskId: string): Promise<void> {
     try {
       if (fs.existsSync(OUTPUT_PATH)) fs.unlinkSync(OUTPUT_PATH);
       if (fs.existsSync(AUDIO_PATH)) fs.unlinkSync(AUDIO_PATH);
+      if (trimmedAudioPath && fs.existsSync(trimmedAudioPath)) fs.unlinkSync(trimmedAudioPath);
     } catch {
       // ignore cleanup errors
     }

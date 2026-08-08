@@ -21,30 +21,45 @@
   align-items: center;
   padding: 28rpx 30rpx;
   margin-bottom: 30rpx;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 24rpx;
 }
 
-.avatar-btn {
-  width: 120rpx;
-  height: 120rpx;
+/* 圆形头像容器 */
+.avatar-wrapper {
+  position: relative;
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.profile-avatar {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 50%;
+  display: block;
+}
+
+/* 透明按钮覆盖层，用于触发 chooseAvatar */
+.avatar-btn-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 80rpx;
+  height: 80rpx;
   padding: 0;
   margin: 0;
   border-radius: 50%;
   background: transparent;
-  border: none;
-  flex-shrink: 0;
-  line-height: 1;
-}
-
-.avatar-btn::after {
+  opacity: 0;
   border: none;
 }
 
-.profile-avatar {
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 50%;
-  overflow: hidden;
-  display: block;
+.avatar-btn-overlay::after {
+  content: none;
+  border: none;
 }
 
 .profile-avatar-empty {
@@ -67,20 +82,26 @@
   min-width: 0;
 }
 
+.profile-nickname-row {
+  display: flex;
+  flex-direction: column;
+}
+
 .profile-nickname {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-main);
   height: 48rpx;
   line-height: 48rpx;
   padding: 0;
-  margin-bottom: 8rpx;
+  margin-bottom: 0;
   background: transparent;
 }
 
 .profile-count {
   font-size: 13px;
   color: var(--text-sub);
+  font-weight: 500;
 }
 
 /* ===== 作品卡片 ===== */
@@ -89,6 +110,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
+  margin-bottom: 0;
 }
 
 .work-card-pending {
@@ -98,53 +120,65 @@
 /* 左滑删除 */
 .swipe-item {
   position: relative;
-  overflow: hidden;
   margin-bottom: 20rpx;
+  display: flex;
+  align-items: center;
 }
 
 .swipe-delete {
   position: absolute;
+  right: 48rpx;
   top: 0;
-  right: 0;
   bottom: 0;
-  width: 140rpx;
+  margin: auto 0;
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  background: #FF4D4F;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #FF4D4F;
-  border-radius: 24rpx;
   opacity: 0;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.2s ease;
+  z-index: 0;
 }
 
 .swipe-delete-icon {
-  font-size: 40rpx;
+  font-size: 28rpx;
   color: #fff;
+  font-weight: 700;
+  line-height: 1;
 }
 
-.swipe-content {
+.swipe-card-wrap {
   position: relative;
   z-index: 1;
-  background: var(--bg-card, #FFFFFF);
+  width: 100%;
 }
 
 .work-cover {
-  width: 160rpx;
-  height: 100rpx;
-  border-radius: 16rpx;
-  background: linear-gradient(135deg, #00B865 0%, #009A55 100%);
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 12rpx;
+  background: #00B865;
   margin-right: 20rpx;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+
+.work-cover-img {
+  width: 120rpx;
+  height: 120rpx;
 }
 
 .work-cover-spinner {
-  width: 36rpx;
-  height: 36rpx;
+  width: 28rpx;
+  height: 28rpx;
   border-radius: 50%;
-  border: 4rpx solid rgba(255, 255, 255, 0.35);
+  border: 3rpx solid rgba(255, 255, 255, 0.35);
   border-top-color: #ffffff;
   animation: work-spin 0.8s linear infinite;
 }
@@ -157,14 +191,20 @@
 .work-info {
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   flex: 1;
   min-width: 0;
+  height: 120rpx;
+}
+
+.work-header {
+  display: flex;
+  flex-direction: column;
 }
 
 .work-title {
   font-size: 15px;
   font-weight: 600;
-  margin-bottom: 8rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -172,19 +212,12 @@
 
 .work-duration {
   font-size: 12px;
-  color: var(--text-sub);
+  color: var(--text-hint);
 }
 
 .work-time {
   font-size: 12px;
   color: var(--text-hint);
-}
-
-.work-meta-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 16rpx;
 }
 
 .work-status-row {
