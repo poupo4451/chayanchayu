@@ -4,9 +4,14 @@
     wx:for="{{list}}"
     wx:key="pagePath"
     data-path="{{item.pagePath}}"
+    data-index="{{index}}"
     bindtap="switchTab"
   >
-    <text class="tab-icon">{{item.icon}}</text>
+    <image
+      class="tab-icon"
+      src="{{selected === index ? item.activeIcon : item.icon}}"
+      mode="aspectFit"
+    />
     <text class="tab-text {{selected === index ? 'tab-text-active' : ''}}">{{item.text}}</text>
   </view>
 </view>

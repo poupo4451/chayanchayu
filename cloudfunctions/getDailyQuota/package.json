@@ -1,0 +1,9 @@
+{
+  "name": "getDailyQuota",
+  "version": "1.0.0",
+  "description": "查询当前用户今日MV生成额度（剩余次数）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

@@ -17,6 +17,9 @@ import {
   // 时序参数
   ENTER_FRAMES,
   EXIT_FRAMES,
+  // 常驻律动
+  IDLE_MOTION,
+  RE_ACCENT,
   // 能量映射
   ENERGY_MAP,
   FADE_SPEED,
@@ -164,8 +167,10 @@ export function pickVariant(seed: number): EnterVariant {
 /** 按流派挑选动画池后再按 seed 轮换；未知流派回退到默认池 */
 export function pickVariantForGenre(seed: number, genre?: string): EnterVariant {
   const pool = (genre && GENRE_VARIANT_POOLS[genre]) || VARIANT_CYCLE;
-  const i = ((seed % pool.length) + pool.length) % pool.length;
-  return pool[i];
+  // 乘质数 + 右移异或做散列：直接 seed % pool.length 在 seed 本身有步长
+  // （item.index * 7）时周期极短，池长 11 时只会在少数几个变体间反复打转。
+  const h = (((seed * 2654435761) ^ (seed >>> 3)) >>> 0) % pool.length;
+  return pool[h];
 }
 
 /** Hero 独占时刻专用动画池 */
@@ -201,7 +206,9 @@ export function comboEnterMotion(
 
   for (const v of variants) {
     const m = enterMotion(v, raw, side);
-    opacity *= m.opacity;
+    // 取最小值而非乘积：3 个变体叠加时 fade³ 会让前 40% 进度整体近乎全透明，
+    // 等于把三个动画压成一次「突然出现」，反而比单变体更没有层次。
+    opacity = Math.min(opacity, m.opacity);
     if (m.transform) transforms.push(m.transform);
     if (m.filter) filters.push(m.filter);
   }
@@ -857,4 +864,100 @@ export function beatEnergy(frame: number, beats: number[], fps: number, decay = 
   if (idx < 0) return 0;
   const dt = (frame - beats[idx]) / fps;
   return Math.exp(-dt * decay);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 常驻律动层 — 消灭「入场播完到退场开始之间」的冻帧
+// ═══════════════════════════════════════════════════════════════════
+
+export interface IdleMotionState {
+  /** 整组缩放系数（呼吸 × 自振 × Ken-Burns） */
+  scale: number;
+  /** 慢漂位移（px） */
+  x: number;
+  y: number;
+  /** 当帧节拍能量 0..1，可用于光效强度 */
+  beat: number;
+}
+
+/**
+ * 舞台常驻律动。
+ *
+ * 关键点：`beatEnergy` 这里传的是**当前帧** `frame`，而不是气泡的固定
+ * `startFrame`。旧代码传固定帧号，算出来是个常量，完全没有逐帧律动能力。
+ *
+ * 四个分量叠加，任一分量单独失效都还有兜底：
+ *   - beatPunch：有 beats 数据时随鼓点弹跳
+ *   - breathe  ：纯正弦自呼吸，没有 beats 也有生命感
+ *   - creep    ：Ken-Burns 慢推，长镜头持续变化
+ *   - drift    ：X/Y 异频慢漂，避免线性平移的机械感
+ *
+ * 长停留自适应：holdSeconds 越大，呼吸与慢漂幅度按 boost 曲线放大，
+ * 用来兜住气泡稀疏（uniform 降级）时 8~30 秒的超长组停留。
+ *
+ * @param frame      当前帧
+ * @param groupStart 本组进场帧，用于算已停留时长
+ * @param groupIndex 组序号，用于给不同组错开相位
+ * @param holdSeconds 本组预计总停留秒数；不传则按已停留时长自适应
+ */
+export function stageIdleMotion(
+  frame: number,
+  groupStart: number,
+  groupIndex: number,
+  beats: number[],
+  fps: number,
+  holdSeconds?: number,
+): IdleMotionState {
+  const beat = beatEnergy(frame, beats, fps, IDLE_MOTION.beatDecay);
+  const t = Math.max(0, (frame - groupStart) / fps);
+  // 黄金角附近的无理数相位，保证相邻组的律动不同步
+  const phase = groupIndex * 1.37;
+
+  // 长停留增强：0 → 1 线性爬升后钳制，再映射到 [1, boostMaxMultiplier]
+  const hold = holdSeconds ?? t;
+  const ramp = Math.min(
+    Math.max((hold - IDLE_MOTION.boostAfterS) / IDLE_MOTION.boostRampS, 0),
+    1,
+  );
+  const boost = 1 + ramp * (IDLE_MOTION.boostMaxMultiplier - 1);
+
+  const punch = 1 + beat * IDLE_MOTION.beatPunch;
+  const breathe = 1 + Math.sin(t * IDLE_MOTION.breatheHz + phase) * IDLE_MOTION.breatheAmp * boost;
+  const creep = 1 + Math.min(t * IDLE_MOTION.creepPerSecond, IDLE_MOTION.creepMax);
+
+  const x = Math.sin(t * IDLE_MOTION.driftXHz + phase) * IDLE_MOTION.driftXPx * boost;
+  const y = Math.cos(t * IDLE_MOTION.driftYHz + phase * 0.7) * IDLE_MOTION.driftYPx * boost;
+
+  return { scale: punch * breathe * creep, x, y, beat };
+}
+
+export interface ReAccentState {
+  scale: number;
+  rotate: number;
+}
+
+/**
+ * 长驻气泡的二次脉冲。
+ * 气泡停留超过 RE_ACCENT.afterSeconds 后，每逢鼓点自己轻微 pop 一下，
+ * 把「入场完了就再也不动」的长镜头救活。相邻气泡旋转方向相反，避免整齐感。
+ *
+ * @param bubbleStart 该气泡的入场帧
+ * @param seed        用于决定旋转方向
+ */
+export function reAccentMotion(
+  frame: number,
+  bubbleStart: number,
+  beats: number[],
+  fps: number,
+  seed: number,
+): ReAccentState {
+  const held = (frame - bubbleStart) / fps;
+  if (held < RE_ACCENT.afterSeconds) return { scale: 1, rotate: 0 };
+  const e = beatEnergy(frame, beats, fps, RE_ACCENT.beatDecay);
+  if (e <= 0.001) return { scale: 1, rotate: 0 };
+  const dir = seed % 2 === 0 ? 1 : -1;
+  return {
+    scale: 1 + e * RE_ACCENT.scale,
+    rotate: dir * e * RE_ACCENT.rotate,
+  };
 }

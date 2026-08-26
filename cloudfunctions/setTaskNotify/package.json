@@ -1,0 +1,9 @@
+{
+  "name": "setTaskNotify",
+  "version": "1.0.0",
+  "description": "为进行中的任务补开生成完成通知（订阅消息凭证）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

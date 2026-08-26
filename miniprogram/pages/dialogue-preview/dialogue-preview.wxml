@@ -1,25 +1,135 @@
 <view class="page preview-page">
-  <view class="bubble-list">
-    <block wx:if="{{loading}}">
-      <text class="text-sub">加载中…</text>
-    </block>
-    <block wx:else>
-      <chat-bubble-preview
-        wx:for="{{dialogue}}"
-        wx:key="index"
-        line="{{item}}"
-        data-index="{{index}}"
-        bindtap="onEditLine"
-      />
-    </block>
+  <!-- ==================== 顶部角色栏 ==================== -->
+  <view class="role-bar">
+    <view
+      class="role-chip"
+      hover-class="role-chip-hover"
+      hover-stay-time="60"
+      bindtap="onChangeLeftAvatar"
+    >
+      <image class="role-avatar" src="/images/avatars/{{leftAvatarId}}.png" mode="aspectFill" />
+      <view class="role-meta">
+        <text class="role-name">{{leftName || '角色 A'}}</text>
+        <text class="role-hint">白色气泡</text>
+      </view>
+    </view>
+
+    <view
+      class="role-swap"
+      hover-class="role-swap-hover"
+      hover-stay-time="60"
+      bindtap="onSwapAvatars"
+    >
+      <image class="role-swap-icon" src="/images/icon-swap.svg" mode="aspectFit" />
+    </view>
+
+    <view
+      class="role-chip role-chip-right"
+      hover-class="role-chip-hover"
+      hover-stay-time="60"
+      bindtap="onChangeRightAvatar"
+    >
+      <image class="role-avatar" src="/images/avatars/{{rightAvatarId}}.png" mode="aspectFill" />
+      <view class="role-meta role-meta-right">
+        <text class="role-name">{{rightName || '角色 B'}}</text>
+        <text class="role-hint">绿色气泡</text>
+      </view>
+    </view>
   </view>
 
-  <view class="action-row">
-    <view class="btn-outline" bindtap="onRegenerate">
-      <text>重新生成</text>
+  <!-- 操作提示：长按拖拽无任何可发现性，需一行说明 -->
+  <view class="tip-row">
+    <text class="tip-text">轻点气泡可编辑 · 长按可拖动排序</text>
+  </view>
+
+  <!-- ==================== 可滚动气泡列表 ==================== -->
+  <scroll-view
+    id="bubbleScroll"
+    class="bubble-scroll"
+    type="list"
+    scroll-y="{{dragIndex < 0}}"
+    enhanced
+    show-scrollbar="{{false}}"
+    bindscroll="onBubbleScroll"
+    bindtouchmove="onDragTouchMove"
+    bindtouchend="onDragTouchEnd"
+    bindtouchcancel="onDragTouchEnd"
+  >
+    <!-- 生成最长可等 60s，用骨架屏替代单行「加载中…」 -->
+    <block wx:if="{{loading}}">
+      <view class="skeleton">
+        <view
+          class="sk-row {{sk.role}}"
+          wx:for="{{skeleton}}"
+          wx:for-item="sk"
+          wx:for-index="skIndex"
+          wx:key="skIndex"
+        >
+          <view class="sk-avatar"></view>
+          <view class="sk-bubble" style="width: {{sk.w}}rpx;"></view>
+        </view>
+        <text class="sk-tip">正在编写对话，请稍候…</text>
+      </view>
+    </block>
+
+    <block wx:else>
+      <view
+        wx:for="{{dialogue}}"
+        wx:key="index"
+        class="drag-wrapper {{dragIndex === index ? 'drag-active' : ''}}"
+        style="{{item._translateY != null ? 'transform: translateY(' + item._translateY + 'px);' : ''}}"
+        data-index="{{index}}"
+        bindlongpress="onLineLongPress"
+      >
+        <chat-bubble-preview line="{{item}}" data-index="{{index}}" bindtap="onEditLine" />
+      </view>
+    </block>
+
+    <view class="bubble-scroll-footer"></view>
+  </scroll-view>
+
+  <!-- ==================== 底部操作面板 ==================== -->
+  <view class="sheet">
+    <view class="sheet-row">
+      <view
+        class="add-btn"
+        hover-class="add-btn-hover"
+        hover-stay-time="60"
+        bindtap="onAddBubble"
+        data-role="left"
+      >
+        <view class="swatch swatch-white"></view>
+        <text class="add-btn-text">添加白色气泡</text>
+      </view>
+      <view
+        class="add-btn"
+        hover-class="add-btn-hover"
+        hover-stay-time="60"
+        bindtap="onAddBubble"
+        data-role="right"
+      >
+        <view class="swatch swatch-green"></view>
+        <text class="add-btn-text">添加绿色气泡</text>
+      </view>
     </view>
-    <view class="btn-gradient flex-1" bindtap="onConfirm">
-      <text>确认生成MV</text>
+
+    <view class="sheet-row">
+      <view
+        class="btn-ghost"
+        hover-class="btn-ghost-hover"
+        hover-stay-time="60"
+        bindtap="onRegenerate"
+      >
+        <text>重新生成</text>
+      </view>
+      <view
+        class="btn-primary"
+        hover-class="btn-primary-hover"
+        hover-stay-time="60"
+        bindtap="onConfirm"
+      >
+        <text>确认生成 MV</text>
+      </view>
     </view>
   </view>
 </view>

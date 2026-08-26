@@ -1,23 +1,124 @@
-<view class="page progress-page">
-  <view class="card progress-card">
-    <text class="stage-emoji">{{failed ? '😵' : '🎧'}}</text>
-    <text class="stage-label">{{stageLabel}}</text>
+<view class="tp-page">
+  <!-- ==================== 状态读数 ==================== -->
+  <view class="hero">
+    <!-- AIGC 内容标识：合规声明需始终展示，不随状态变化。
+         各状态（生成中/中断/完成）的信息由下方 hero-stage 的 stageLabel 承载 -->
+    <text class="hero-eyebrow">项目由人工智能助力生成</text>
 
-    <view class="progress-bar">
-      <view class="progress-fill" style="width: {{progress}}%"></view>
+    <view class="metric">
+      <text class="metric-num">{{displayProgress}}</text>
+      <text class="metric-unit">%</text>
     </view>
-    <text class="progress-num">{{progress}}%</text>
 
-    <block wx:if="{{hint && !failed}}">
-      <text class="stage-hint">{{hint}}</text>
-    </block>
+    <text class="hero-stage">{{stageLabel}}</text>
 
-    <block wx:if="{{failed}}">
-      <text class="error-msg">{{errorMsg || '生成失败，请稍后重试'}}</text>
-    </block>
+    <view class="track">
+      <view class="track-fill {{failed ? 'track-fill-fail' : ''}}" style="width: {{displayProgress}}%;">
+        <view wx:if="{{!failed && !isDone}}" class="track-shine"></view>
+      </view>
+    </view>
   </view>
 
-  <view class="btn-outline" bindtap="onExit">
-    <text>先去逛逛，稍后再看</text>
+  <!-- ==================== 流程清单 ==================== -->
+  <view class="steps">
+    <view class="step step-{{item.state}}" wx:for="{{steps}}" wx:key="key">
+      <view class="step-rail">
+        <view class="step-dot">
+          <text wx:if="{{item.state === 'done'}}" class="step-check">✓</text>
+          <text wx:elif="{{item.state === 'fail'}}" class="step-cross">✕</text>
+          <view wx:elif="{{item.state === 'active'}}" class="step-live">
+            <view class="step-pulse"></view>
+          </view>
+          <view wx:else class="step-idle"></view>
+        </view>
+        <view wx:if="{{index < steps.length - 1}}" class="step-line"></view>
+      </view>
+      <view class="step-body">
+        <text class="step-label">{{item.label}}</text>
+        <text wx:if="{{item.note}}" class="step-note">{{item.note}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- ==================== 完成通知开关 ====================
+       仅在生成中展示：已完成/失败时通知已无意义，避免占位干扰 -->
+  <view
+    wx:if="{{!isDone && !failed}}"
+    class="notify {{notifyState === 'on' ? 'notify-on' : ''}}"
+    hover-class="{{notifyState === 'on' ? '' : 'notify-hover'}}"
+    hover-stay-time="60"
+    bindtap="onToggleNotify"
+  >
+    <view class="notify-icon">
+      <view wx:if="{{notifyState === 'on'}}" class="notify-tick"></view>
+      <view wx:else class="notify-bell"></view>
+    </view>
+    <view class="notify-body">
+      <text class="notify-title">{{notifyState === 'on' ? '已开启完成通知' : '开启完成通知'}}</text>
+      <text class="notify-desc">{{notifyState === 'on' ? '生成完成后会收到微信服务通知，现在可以放心退出' : (notifyState === 'banned' ? '通知已被关闭，可在右上角「…」→ 设置 → 订阅消息中开启' : '完成后微信提醒你，不用一直守在这个页面')}}</text>
+    </view>
+    <text wx:if="{{notifyState !== 'on'}}" class="notify-arrow">›</text>
+  </view>
+
+  <!-- ==================== 失败说明 ==================== -->
+  <view wx:if="{{failed}}" class="alert">
+    <text class="alert-text">{{errorMsg || '这次没能生成成功，换个说法重新创建一次通常就好了'}}</text>
+  </view>
+
+  <!-- ==================== 底部操作 ==================== -->
+  <view class="tp-footer-space"></view>
+  <view class="footer">
+    <view wx:if="{{failed}}" class="footer-row">
+      <view class="btn-ghost" hover-class="btn-ghost-hover" hover-stay-time="60" bindtap="onExit">
+        <text>返回首页</text>
+      </view>
+      <view class="btn-primary" hover-class="btn-primary-hover" hover-stay-time="60" bindtap="onRecreate">
+        <text>重新创建</text>
+      </view>
+    </view>
+    <view wx:else class="btn-ghost btn-ghost-block" hover-class="btn-ghost-hover" hover-stay-time="60" bindtap="onExit">
+      <text>先去逛逛，完成后在「我的作品」查看</text>
+    </view>
+  </view>
+
+  <!-- ==================== 订阅通知邀请弹层 ====================
+       进入本页 2 秒后自动弹出（不在上一页的「确认生成」上拦一道，
+       避免主流程被打断的观感）。此刻用户已进入「等待」语境，
+       「要不要通知你」是顺理成章的下一个问题。
+
+       不用 wx.showModal：requestSubscribeMessage 必须在 tap 回调里同步调用，
+       showModal 的 success 回调已丢失用户手势，微信会直接拒绝授权请求。
+       弹层是自动出现的，但用户点按钮仍是真实 tap，授权链路成立。 -->
+  <view
+    wx:if="{{notifyModal}}"
+    class="nm-mask"
+    catchtap="onNotifyDecline"
+    catchtouchmove="noop"
+  >
+    <view class="nm-card" catchtap="noop">
+      <view class="nm-bell">
+        <view class="nm-bell-dot"></view>
+      </view>
+
+      <text class="nm-title">还要等 5～15 分钟</text>
+      <text class="nm-desc">作曲和渲染都在云端进行，你可以先退出去做别的事。完成后要用微信通知你吗？</text>
+
+      <view
+        class="nm-primary"
+        hover-class="nm-primary-hover"
+        hover-stay-time="60"
+        bindtap="onNotifyAccept"
+      >
+        <text>好，完成后通知我</text>
+      </view>
+      <view
+        class="nm-ghost"
+        hover-class="nm-ghost-hover"
+        hover-stay-time="60"
+        bindtap="onNotifyDecline"
+      >
+        <text>不用，我自己来看</text>
+      </view>
+    </view>
   </view>
 </view>

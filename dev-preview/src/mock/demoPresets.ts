@@ -8,6 +8,44 @@ export const DURATION_FRAMES = FPS * DURATION_SEC;
 /** 秒 → 帧 */
 const f = (sec: number) => Math.round(sec * FPS);
 
+/**
+ * 根据气泡文案长度模拟真实歌词级别的节拍密度。
+ *
+ * Suno 逐字时间戳大约每 0.2~0.4 秒一个 beat，远远密于每条气泡一个节拍。
+ * 这里按每条气泡的字数在起止窗口内插子节拍，让 preview 的能量曲线
+ * 更接近正式渲染中 100+ beats 的密集行为。
+ */
+function generateDenseBeats(
+  bubbles: BubbleData[],
+  fps: number,
+  totalFrames: number,
+): number[] {
+  const beats: number[] = [];
+  for (let i = 0; i < bubbles.length; i++) {
+    const b = bubbles[i];
+    const start = b.startFrame ?? 0;
+    // 每条气泡的窗口：从本气泡开始，到下一条气泡开始（或视频末尾），最长 2.5s
+    const nextStart =
+      i + 1 < bubbles.length
+        ? (bubbles[i + 1].startFrame ?? totalFrames)
+        : totalFrames;
+    const end = Math.min(nextStart, start + fps * 2.5);
+    if (end <= start) continue;
+
+    const textLen = b.text.length;
+    // 中文约每 2 个字一个音节拍，至少 2 个，至多 8 个
+    const numBeats = Math.max(2, Math.min(8, Math.ceil(textLen / 2)));
+    const seg = (end - start) / numBeats;
+    for (let j = 0; j < numBeats; j++) {
+      // 确定性伪随机抖动（±15%），让节拍不死板
+      const jitter = (((i * 7 + j * 13) % 100) - 50) / 100 * seg * 0.3;
+      beats.push(Math.round(start + j * seg + jitter));
+    }
+  }
+  // 去重排序
+  return [...new Set(beats)].sort((a, b) => a - b);
+}
+
 // ======================================================================
 // 预设 1：转账拉扯（嘻哈风）
 // ======================================================================
@@ -31,20 +69,20 @@ const preset1Bubbles: BubbleData[] = [
 // 预设 2：深夜暧昧（R&B 风）—— 短句多，间隔密
 // ======================================================================
 const preset2Bubbles: BubbleData[] = [
-  { index: 0, role: 'left', name: '小雅', type: 'text', text: '睡了吗', params: {}, avatarId: 'female-green-tea-3', uid: '0', startFrame: f(0.3) },
+  { index: 0, role: 'left', name: '小雅', type: 'text', text: '睡了吗', params: {}, avatarId: 'female-green-tea-2', uid: '0', startFrame: f(0.3) },
   { index: 1, role: 'right', name: '我', type: 'text', text: '还没', params: {}, avatarId: 'male-2', uid: '1', startFrame: f(1.5) },
-  { index: 2, role: 'left', name: '小雅', type: 'text', text: '我也睡不着', params: {}, avatarId: 'female-green-tea-3', uid: '2', startFrame: f(2.8) },
-  { index: 3, role: 'left', name: '小雅', type: 'text', text: '想起你了', params: {}, avatarId: 'female-green-tea-3', uid: '3', startFrame: f(4.2) },
+  { index: 2, role: 'left', name: '小雅', type: 'text', text: '我也睡不着', params: {}, avatarId: 'female-green-tea-2', uid: '2', startFrame: f(2.8) },
+  { index: 3, role: 'left', name: '小雅', type: 'text', text: '想起你了', params: {}, avatarId: 'female-green-tea-2', uid: '3', startFrame: f(4.2) },
   { index: 4, role: 'right', name: '我', type: 'text', text: '想我什么', params: {}, avatarId: 'male-2', uid: '4', startFrame: f(5.8) },
-  { index: 5, role: 'left', name: '小雅', type: 'text', text: '就是……很多很多', params: {}, avatarId: 'female-green-tea-3', uid: '5', startFrame: f(7.5) },
-  { index: 6, role: 'left', name: '小雅', type: 'text', text: '你懂那种感觉吗', params: {}, avatarId: 'female-green-tea-3', uid: '6', startFrame: f(10.2) },
+  { index: 5, role: 'left', name: '小雅', type: 'text', text: '就是……很多很多', params: {}, avatarId: 'female-green-tea-2', uid: '5', startFrame: f(7.5) },
+  { index: 6, role: 'left', name: '小雅', type: 'text', text: '你懂那种感觉吗', params: {}, avatarId: 'female-green-tea-2', uid: '6', startFrame: f(10.2) },
   { index: 7, role: 'right', name: '我', type: 'text', text: '不太懂', params: {}, avatarId: 'male-2', uid: '7', startFrame: f(12.8) },
-  { index: 8, role: 'left', name: '小雅', type: 'text', text: '笨蛋', params: {}, avatarId: 'female-green-tea-3', uid: '8', startFrame: f(15.2) },
-  { index: 9, role: 'left', name: '小雅', type: 'text', text: '就是你对我来说，很特别', params: {}, avatarId: 'female-green-tea-3', uid: '9', startFrame: f(16.8) },
+  { index: 8, role: 'left', name: '小雅', type: 'text', text: '笨蛋', params: {}, avatarId: 'female-green-tea-2', uid: '8', startFrame: f(15.2) },
+  { index: 9, role: 'left', name: '小雅', type: 'text', text: '就是你对我来说，很特别', params: {}, avatarId: 'female-green-tea-2', uid: '9', startFrame: f(16.8) },
   { index: 10, role: 'right', name: '我', type: 'text', text: '怎么个特别法', params: {}, avatarId: 'male-2', uid: '10', startFrame: f(20.0) },
-  { index: 11, role: 'left', name: '小雅', type: 'redpacket', text: '红包', params: { amount: '131.40' }, avatarId: 'female-green-tea-3', uid: '11', startFrame: f(23.0) },
+  { index: 11, role: 'left', name: '小雅', type: 'redpacket', text: '红包', params: { amount: '131.40' }, avatarId: 'female-green-tea-2', uid: '11', startFrame: f(23.0) },
   { index: 12, role: 'right', name: '我', type: 'text', text: '这什么', params: {}, avatarId: 'male-2', uid: '12', startFrame: f(25.5) },
-  { index: 13, role: 'left', name: '小雅', type: 'text', text: '自己领会🌙', params: {}, avatarId: 'female-green-tea-3', uid: '13', startFrame: f(27.8) },
+  { index: 13, role: 'left', name: '小雅', type: 'text', text: '自己领会🌙', params: {}, avatarId: 'female-green-tea-2', uid: '13', startFrame: f(27.8) },
 ];
 
 // ======================================================================
@@ -68,20 +106,20 @@ const preset3Bubbles: BubbleData[] = [
 // ======================================================================
 const preset4Bubbles: BubbleData[] = [
   { index: 0, role: 'right', name: '我', type: 'text', text: '早安☀️', params: {}, avatarId: 'male-2', uid: '0', startFrame: f(0.3) },
-  { index: 1, role: 'left', name: '可可', type: 'text', text: '这么早就醒了', params: {}, avatarId: 'female-green-tea-3', uid: '1', startFrame: f(1.6) },
+  { index: 1, role: 'left', name: '可可', type: 'text', text: '这么早就醒了', params: {}, avatarId: 'female-green-tea-2', uid: '1', startFrame: f(1.6) },
   { index: 2, role: 'right', name: '我', type: 'text', text: '因为梦见你了', params: {}, avatarId: 'male-2', uid: '2', startFrame: f(3.2) },
-  { index: 3, role: 'left', name: '可可', type: 'text', text: '油嘴滑舌🙄', params: {}, avatarId: 'female-green-tea-3', uid: '3', startFrame: f(4.8) },
-  { index: 4, role: 'left', name: '可可', type: 'text', text: '梦到我什么了', params: {}, avatarId: 'female-green-tea-3', uid: '4', startFrame: f(6.4) },
+  { index: 3, role: 'left', name: '可可', type: 'text', text: '油嘴滑舌🙄', params: {}, avatarId: 'female-green-tea-2', uid: '3', startFrame: f(4.8) },
+  { index: 4, role: 'left', name: '可可', type: 'text', text: '梦到我什么了', params: {}, avatarId: 'female-green-tea-2', uid: '4', startFrame: f(6.4) },
   { index: 5, role: 'right', name: '我', type: 'text', text: '梦到你请我吃饭', params: {}, avatarId: 'male-2', uid: '5', startFrame: f(8.0) },
-  { index: 6, role: 'left', name: '可可', type: 'text', text: '？', params: {}, avatarId: 'female-green-tea-3', uid: '6', startFrame: f(10.2) },
+  { index: 6, role: 'left', name: '可可', type: 'text', text: '？', params: {}, avatarId: 'female-green-tea-2', uid: '6', startFrame: f(10.2) },
   { index: 7, role: 'right', name: '我', type: 'text', text: '所以今天中午有空吗', params: {}, avatarId: 'male-2', uid: '7', startFrame: f(11.8) },
-  { index: 8, role: 'left', name: '可可', type: 'text', text: '你请客！', params: {}, avatarId: 'female-green-tea-3', uid: '8', startFrame: f(14.2) },
+  { index: 8, role: 'left', name: '可可', type: 'text', text: '你请客！', params: {}, avatarId: 'female-green-tea-2', uid: '8', startFrame: f(14.2) },
   { index: 9, role: 'right', name: '我', type: 'text', text: '行行行', params: {}, avatarId: 'male-2', uid: '9', startFrame: f(16.4) },
-  { index: 10, role: 'left', name: '可可', type: 'text', text: '那我想吃日料', params: {}, avatarId: 'female-green-tea-3', uid: '10', startFrame: f(18.2) },
+  { index: 10, role: 'left', name: '可可', type: 'text', text: '那我想吃日料', params: {}, avatarId: 'female-green-tea-2', uid: '10', startFrame: f(18.2) },
   { index: 11, role: 'right', name: '我', type: 'redpacket', text: '红包', params: { amount: '200.00' }, avatarId: 'male-2', uid: '11', startFrame: f(20.0) },
-  { index: 12, role: 'left', name: '可可', type: 'text', text: '😍爱了', params: {}, avatarId: 'female-green-tea-3', uid: '12', startFrame: f(22.8) },
+  { index: 12, role: 'left', name: '可可', type: 'text', text: '😍爱了', params: {}, avatarId: 'female-green-tea-2', uid: '12', startFrame: f(22.8) },
   { index: 13, role: 'right', name: '我', type: 'text', text: '12点老地方见', params: {}, avatarId: 'male-2', uid: '13', startFrame: f(25.2) },
-  { index: 14, role: 'left', name: '可可', type: 'text', text: '等我化妆💄', params: {}, avatarId: 'female-green-tea-3', uid: '14', startFrame: f(27.8) },
+  { index: 14, role: 'left', name: '可可', type: 'text', text: '等我化妆💄', params: {}, avatarId: 'female-green-tea-2', uid: '14', startFrame: f(27.8) },
 ];
 
 // ======================================================================
@@ -145,7 +183,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '转账拉扯',
     desc: '嘻哈 · 红包+转账',
     bubbles: preset1Bubbles,
-    beats: preset1Bubbles.map((b) => b.startFrame ?? 0).sort((a, b) => a - b),
+    beats: generateDenseBeats(preset1Bubbles, FPS, DURATION_FRAMES),
     genre: '嘻哈',
   },
   {
@@ -153,7 +191,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '深夜暧昧',
     desc: 'R&B · 红包试探',
     bubbles: preset2Bubbles,
-    beats: preset2Bubbles.map((b) => b.startFrame ?? 0).sort((a, b) => a - b),
+    beats: generateDenseBeats(preset2Bubbles, FPS, DURATION_FRAMES),
     genre: 'R&B',
   },
   {
@@ -161,7 +199,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '假意关心',
     desc: '伤感 · 欲言又止',
     bubbles: preset3Bubbles,
-    beats: preset3Bubbles.map((b) => b.startFrame ?? 0).sort((a, b) => a - b),
+    beats: generateDenseBeats(preset3Bubbles, FPS, DURATION_FRAMES),
     genre: '流行',
   },
   {
@@ -169,7 +207,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '甜蜜拉扯',
     desc: '轻快 · 暧昧互动',
     bubbles: preset4Bubbles,
-    beats: preset4Bubbles.map((b) => b.startFrame ?? 0).sort((a, b) => a - b),
+    beats: generateDenseBeats(preset4Bubbles, FPS, DURATION_FRAMES),
     genre: '流行',
   },
   {
@@ -177,7 +215,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '直接要钱',
     desc: '抖音 · 快节奏短句',
     bubbles: preset5Bubbles,
-    beats: preset5Bubbles.map((b) => b.startFrame ?? 0).sort((a, b) => a - b),
+    beats: generateDenseBeats(preset5Bubbles, FPS, DURATION_FRAMES),
     genre: '抖音风',
   },
   {
@@ -185,7 +223,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '欲擒故纵',
     desc: '流行 · 进退试探',
     bubbles: preset6Bubbles,
-    beats: preset6Bubbles.map((b) => b.startFrame ?? 0).sort((a, b) => a - b),
+    beats: generateDenseBeats(preset6Bubbles, FPS, DURATION_FRAMES),
     genre: '流行',
   },
 ];

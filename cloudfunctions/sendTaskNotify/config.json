@@ -1,0 +1,10 @@
+{
+  "timeout": 20,
+  "memorySize": 256,
+  "permissions": {
+    "openapi": [
+      "subscribeMessage.send",
+      "subscribeMessage.getTemplateList"
+    ]
+  }
+}

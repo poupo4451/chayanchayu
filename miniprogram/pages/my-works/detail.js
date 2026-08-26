@@ -1,3 +1,5 @@
+const { getWorksList } = require('../../utils/api');
+
 function decodeQueryValue(value) {
   if (value == null) return '';
   try {
@@ -45,6 +47,15 @@ function getTempFileURL(fileID) {
 
 const AUTO_HIDE_DELAY = 3200;
 
+/**
+ * 仅凭 taskId 进入时（来自订阅消息推送）的作品查找重试参数。
+ * 渲染服务是「先把 tasks 置为 completed，再写入 works 记录」
+ * （见 cloud-run-remotion/src/render.ts），而通知由定时器在检测到 completed 后下发，
+ * 因此用户点开推送时 works 记录有极小概率还没落库，需有限次重试兜底。
+ */
+const TASK_LOOKUP_RETRY_MS = 1200;
+const TASK_LOOKUP_RETRY_MAX = 3;
+
 Page({
   data: {
     loading: true,
@@ -74,28 +85,104 @@ Page({
     const statusBarHeight = (app.globalData && app.globalData.statusBarHeight) || 20;
     const safeAreaBottom = (app.globalData && app.globalData.safeAreaBottom) || 0;
 
-    const createdAt = Number(decodeQueryValue(query.createdAt)) || 0;
-    const work = {
-      id: decodeQueryValue(query.workId),
-      title: decodeQueryValue(query.title) || '未命名作品',
-      duration: decodeQueryValue(query.duration) || '--:--',
-      videoUrl: decodeQueryValue(query.videoUrl),
-      playUrl: '',
-      createdAt,
-      createdAtText: formatCreatedAt(createdAt),
-    };
-
     this.setData({
-      work,
       safeTop: statusBarHeight + 12,
       safeBottom: safeAreaBottom,
     });
     this.videoCtx = wx.createVideoContext('workVideo', this);
-    this.loadVideo();
+
+    // 从「我的作品」列表进入：完整信息都在 query 里，无需再查库
+    if (query.videoUrl) {
+      const createdAt = Number(decodeQueryValue(query.createdAt)) || 0;
+      this.setData({
+        work: {
+          id: decodeQueryValue(query.workId),
+          title: decodeQueryValue(query.title) || '未命名作品',
+          duration: decodeQueryValue(query.duration) || '--:--',
+          videoUrl: decodeQueryValue(query.videoUrl),
+          playUrl: '',
+          createdAt,
+          createdAtText: formatCreatedAt(createdAt),
+        },
+      });
+      this.loadVideo();
+      return;
+    }
+
+    // 从订阅消息推送进入：page 参数只能带很短的信息，只有 taskId，
+    // 需要先按 taskId 反查作品记录再播放
+    const taskId = decodeQueryValue(query.taskId);
+    if (taskId) {
+      this.pendingTaskId = taskId;
+      this.lookupRetryLeft = TASK_LOOKUP_RETRY_MAX;
+      this.loadByTaskId(taskId);
+      return;
+    }
+
+    this.setData({ loading: false, loadError: '缺少作品参数，请从「我的作品」进入' });
   },
 
   onUnload() {
     this.clearAutoHideTimer();
+    this.clearLookupTimer();
+  },
+
+  clearLookupTimer() {
+    if (this.lookupTimer) {
+      clearTimeout(this.lookupTimer);
+      this.lookupTimer = null;
+    }
+  },
+
+  /**
+   * 按 taskId 在作品列表里反查对应记录。
+   * 复用 getWorksList 而不新增云函数：它已做了 openid 过滤，
+   * 天然保证用户只能打开自己的作品，无需再写一遍所有权校验。
+   */
+  async loadByTaskId(taskId) {
+    this.setData({ loading: true, loadError: '' });
+
+    try {
+      const list = await getWorksList();
+      const hit = (list || []).find(
+        (item) => item.type === 'work' && item.taskId === taskId && item.videoUrl,
+      );
+
+      if (!hit) {
+        // works 记录可能还没落库（渲染刚完成的极短窗口），隔一会儿重试
+        if (this.lookupRetryLeft > 0) {
+          this.lookupRetryLeft -= 1;
+          this.clearLookupTimer();
+          this.lookupTimer = setTimeout(() => {
+            this.lookupTimer = null;
+            this.loadByTaskId(taskId);
+          }, TASK_LOOKUP_RETRY_MS);
+          return;
+        }
+        this.setData({ loading: false, loadError: '没有找到这个作品，可能已被删除' });
+        return;
+      }
+
+      const createdAt = Number(hit.createdAt) || 0;
+      this.setData({
+        work: {
+          id: hit.id || '',
+          title: hit.title || '未命名作品',
+          duration: hit.duration || '--:--',
+          videoUrl: hit.videoUrl,
+          playUrl: '',
+          createdAt,
+          createdAtText: formatCreatedAt(createdAt),
+        },
+      });
+      this.loadVideo();
+    } catch (e) {
+      console.error('loadByTaskId failed', e);
+      this.setData({
+        loading: false,
+        loadError: (e && e.message) || '作品加载失败，请稍后再试',
+      });
+    }
   },
 
   async loadVideo() {
@@ -126,6 +213,13 @@ Page({
   },
 
   onRetry() {
+    // 从推送进入且还没查到作品时，重试要重走「按 taskId 反查」，
+    // 否则 videoUrl 为空、loadVideo 只会立刻再报一次同样的错
+    if (!this.data.work.videoUrl && this.pendingTaskId) {
+      this.lookupRetryLeft = TASK_LOOKUP_RETRY_MAX;
+      this.loadByTaskId(this.pendingTaskId);
+      return;
+    }
     this.loadVideo();
   },
 

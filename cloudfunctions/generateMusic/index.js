@@ -102,13 +102,30 @@ exports.main = async (event) => {
     return { success: false, message: '缺少 taskId 参数' };
   }
 
+  const openid = cloud.getWXContext().OPENID || '';
   const tasksCol = db.collection('tasks');
 
   try {
     const taskRes = await tasksCol.doc(taskId).get();
     const task = taskRes.data;
 
-    if (!task || !task.lyrics) {
+    if (!task) {
+      return { success: false, message: '任务不存在' };
+    }
+
+    // ── 客户端调用的前置校验（服务端定时器 pollMusicStatus 无 OPENID，直接放行）──
+    // Suno 作曲是付费环节，必须确认调用者是任务所有者，且该任务已在
+    // confirmDialogue 正常扣过每日额度，防止绕过额度闸门直接刷付费接口。
+    if (openid) {
+      if (task.userId !== openid) {
+        return { success: false, code: 'FORBIDDEN', message: '无权操作此任务' };
+      }
+      if (!task.quotaDateKey) {
+        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起生成' };
+      }
+    }
+
+    if (!task.lyrics) {
       throw new Error('任务缺少歌词内容，无法生成音乐');
     }
 

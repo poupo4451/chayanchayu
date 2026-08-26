@@ -1,0 +1,6 @@
+{
+  "name": "cleanupOrphanFiles",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

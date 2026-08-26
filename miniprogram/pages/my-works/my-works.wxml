@@ -1,80 +1,165 @@
-<view class="page works-page" style="padding-top: {{safeTop}}px;">
-  <text class="page-title">我的作品</text>
-
-  <!-- 用户信息区 -->
-  <view class="profile-card">
+<view class="works-page" style="padding-top: {{safeTop}}px;">
+  <!-- ==================== 用户 / 标题区 ====================
+       与首页 hero 一致：左对齐、不套卡片，头像本身即视觉锚点 -->
+  <view class="hero">
     <view class="avatar-wrapper">
       <image class="profile-avatar" src="{{userProfile.avatarUrl || '/images/default-avatar.png'}}" mode="aspectFill" />
       <button class="avatar-btn-overlay" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar" plain="true" />
     </view>
-    <view class="profile-info">
-      <view class="profile-nickname-row">
-        <input
-          class="profile-nickname"
-          type="nickname"
-          placeholder="轻触填入微信昵称"
-          value="{{userProfile.nickName}}"
-          focus="{{nicknameFocus}}"
-          bindfocus="onNicknameFocus"
-          bindblur="onNicknameBlur"
-        />
+    <view class="hero-meta">
+      <view class="hero-name-row" bindtap="onOpenNicknameEditor">
+        <text class="hero-name {{userProfile.nickName ? '' : 'hero-name-empty'}}">{{userProfile.nickName || '点击设置昵称'}}</text>
+        <text class="hero-edit">编辑</text>
       </view>
-      <text class="profile-count">共 {{works.length}} 个作品</text>
+      <text class="hero-count">{{doneCount}} 个作品{{pendingCount ? ' · ' + pendingCount + ' 个生成中' : ''}}</text>
     </view>
   </view>
 
-  <block wx:if="{{loading}}">
-    <text class="text-sub">加载中…</text>
-  </block>
-  <block wx:elif="{{works.length === 0}}">
-    <view class="empty-state">
-      <text class="text-sub">还没有作品，快去创作一个吧～</text>
+  <!-- ==================== 客服入口 ====================
+       视觉与布局全部由 view 负责，button 仅作透明触发层绝对定位铺满其上。
+       原因：小程序 button 自带 margin:auto 等内置 UA 样式，
+       用类选择器覆盖不可靠（会被挤成居中窄条），
+       故不让 button 参与任何布局——与头像的 chooseAvatar 同一手法。
+       注意：开发者工具不支持唤起客服，需真机验证。 -->
+  <view class="contact-wrap">
+    <view class="contact-pill" hover-class="contact-pill-hover" hover-stay-time="60">
+      <view class="contact-bubble">
+        <view class="contact-dot"></view>
+        <view class="contact-dot"></view>
+        <view class="contact-dot"></view>
+      </view>
+      <text class="contact-title">联系客服</text>
+      <button
+        class="contact-hit"
+        open-type="contact"
+        session-from="my-works"
+        show-message-card="{{false}}"
+        binderror="onContactError"
+      />
+    </view>
+  </view>
+
+  <!-- ==================== 骨架屏 ====================
+       首次加载才显示；切 tab 回来时静默刷新，不闪骨架 -->
+  <block wx:if="{{loading && works.length === 0}}">
+    <view class="sk-row" wx:for="{{[1,2,3]}}" wx:key="*this">
+      <view class="sk-cover"></view>
+      <view class="sk-body">
+        <view class="sk-line sk-line-lg"></view>
+        <view class="sk-line sk-line-sm"></view>
+      </view>
     </view>
   </block>
-  <block wx:else>
-    <view class="swipe-item" wx:for="{{works}}" wx:key="id">
-      <!-- 删除按钮（卡片后方，左滑后可见） -->
-      <view
-        class="swipe-delete"
-        style="opacity: {{item.swipeX < -20 ? 1 : 0}};"
-        catchtap="onDeleteConfirm"
-        data-index="{{index}}"
-      >
-        <text class="swipe-delete-icon">✕</text>
+
+  <!-- ==================== 空状态 ==================== -->
+  <block wx:elif="{{works.length === 0}}">
+    <view class="empty">
+      <view class="empty-art">
+        <view class="empty-bar empty-bar-1"></view>
+        <view class="empty-bar empty-bar-2"></view>
+        <view class="empty-bar empty-bar-3"></view>
+        <view class="empty-bar empty-bar-4"></view>
       </view>
-      <!-- 整张卡片（可滑动） -->
-      <view
-        class="swipe-card-wrap"
-        style="transform: translateX({{item.swipeX}}px); transition: {{touching ? 'none' : 'transform 0.25s ease'}};"
-        data-index="{{index}}"
-        bindtouchstart="onSwipeStart"
-        bindtouchmove="onSwipeMove"
-        bindtouchend="onSwipeEnd"
-        catchtap="onOpenWork"
-      >
-        <view class="work-card card {{item.type === 'task' ? 'work-card-pending' : ''}}">
-          <view class="work-cover">
-            <image
-              wx:if="{{item.type !== 'task'}}"
-              class="work-cover-img"
-              src="/images/work-cover-icon.svg"
-              mode="aspectFill"
-            />
-            <view wx:if="{{item.type === 'task'}}" class="work-cover-spinner"></view>
-          </view>
-          <view class="work-info">
-            <view class="work-header">
-              <text class="work-title">{{item.title}}</text>
-              <text wx:if="{{item.type !== 'task'}}" class="work-duration">{{item.durationText}}</text>
-              <view wx:if="{{item.type === 'task'}}" class="work-status-row">
-                <text class="work-status-badge work-status-badge-{{item.status}}">{{item.statusLabel}}</text>
-                <text class="work-status-progress">{{item.progress}}%</text>
-              </view>
+      <text class="empty-title">还没有作品</text>
+      <text class="empty-text">输入一个主题，自动生成一段对话并唱出来</text>
+      <view class="empty-btn" hover-class="empty-btn-hover" hover-stay-time="60" bindtap="goCreate">
+        <text>创作第一个作品</text>
+      </view>
+    </view>
+  </block>
+
+  <!-- ==================== 作品列表 ==================== -->
+  <block wx:else>
+    <block wx:for="{{works}}" wx:key="id">
+      <!-- 分组标题：只在每组第一条前渲染，保持扁平数组以免打乱左滑索引 -->
+      <view wx:if="{{item.groupLabel}}" class="group">
+        <text class="group-text">{{item.groupLabel}}</text>
+      </view>
+
+      <view class="swipe-item {{item.exiting ? 'swipe-item-exiting' : ''}}">
+        <!-- 删除按钮（卡片后方，左滑后可见） -->
+        <view
+          class="swipe-delete"
+          style="opacity: {{item.swipeX < -20 ? 1 : 0}};"
+          catchtap="onDeleteConfirm"
+          data-index="{{index}}"
+        >
+          <text class="swipe-delete-text">删除</text>
+        </view>
+
+        <!-- 整张卡片（可滑动） -->
+        <view
+          class="swipe-card-wrap"
+          style="transform: translateX({{item.swipeX}}px); transition: {{touching ? 'none' : 'transform 0.25s ease'}};"
+          data-index="{{index}}"
+          bindtouchstart="onSwipeStart"
+          bindtouchmove="onSwipeMove"
+          bindtouchend="onSwipeEnd"
+          catchtap="onOpenWork"
+        >
+          <view class="work-card {{item.highlight ? 'work-card-highlight' : ''}}">
+            <!-- 封面占位：3:4 绿底 + 小 icon。MV 开头是黑场，取视频首帧几乎全黑，故不用真实封面 -->
+            <view class="cover {{item.type === 'task' ? 'cover-task' : ''}}">
+              <block wx:if="{{item.type === 'task'}}">
+                <view wx:if="{{item.status === 'failed'}}" class="cover-fail">
+                  <text class="cover-fail-icon">!</text>
+                </view>
+                <view wx:else class="cover-spinner"></view>
+              </block>
+              <image wx:else class="cover-img" src="/images/work-cover-icon.svg" mode="aspectFit" />
             </view>
-            <text class="work-time">{{item.createdAtText}}</text>
+
+            <view class="work-body">
+              <view class="work-title-row">
+                <text class="work-title">{{item.title}}</text>
+                <text wx:if="{{item.highlight}}" class="work-new">NEW</text>
+              </view>
+
+              <!-- 已完成：时长 + 时间 -->
+              <block wx:if="{{item.type !== 'task'}}">
+                <view class="work-meta">
+                  <text class="work-dot-tag">{{item.durationText}}</text>
+                  <text class="work-meta-sep">·</text>
+                  <text class="work-meta-text">{{item.createdAtText}}</text>
+                </view>
+              </block>
+
+              <!-- 进行中 / 失败：阶段 + 细进度条 -->
+              <block wx:else>
+                <view class="work-meta">
+                  <text class="work-stage {{item.status === 'failed' ? 'work-stage-fail' : ''}}">{{item.statusLabel}}</text>
+                  <text class="work-meta-sep">·</text>
+                  <text class="work-meta-text">{{item.createdAtText}}</text>
+                </view>
+                <view wx:if="{{item.status !== 'failed'}}" class="mini-track">
+                  <view class="mini-fill" style="width: {{item.progress}}%;"></view>
+                </view>
+                <text wx:else class="work-retry-hint">点击可重新查看详情</text>
+              </block>
+            </view>
           </view>
         </view>
       </view>
-    </view>
+    </block>
   </block>
+</view>
+
+<!-- 昵称编辑弹窗 -->
+<view class="nickname-modal-mask" wx:if="{{nicknameEditing}}" bindtap="onCloseNicknameEditor"></view>
+<view class="nickname-modal" wx:if="{{nicknameEditing}}" catchtap="noop">
+  <view class="nickname-modal-content">
+    <view class="nickname-modal-title">设置昵称</view>
+    <input
+      class="nickname-modal-input"
+      type="nickname"
+      placeholder="点击可选用微信昵称"
+      value="{{editingNickname}}"
+      bindinput="onNicknameInput"
+      bindblur="onNicknameEditorBlur"
+    />
+    <view class="nickname-modal-actions">
+      <view class="nickname-modal-btn nickname-modal-btn-cancel" bindtap="onCloseNicknameEditor">取消</view>
+      <view class="nickname-modal-btn nickname-modal-btn-confirm" bindtap="onConfirmNickname">确定</view>
+    </view>
+  </view>
 </view>

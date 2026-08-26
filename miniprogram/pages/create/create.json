@@ -1,6 +1,7 @@
 {
   "navigationBarTitleText": "创作",
-  "navigationBarBackgroundColor": "#FFFFFF",
+  "navigationBarBackgroundColor": "#EDEDED",
   "navigationBarTextStyle": "black",
+  "backgroundColor": "#EDEDED",
   "usingComponents": {}
 }

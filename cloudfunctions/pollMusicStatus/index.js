@@ -22,6 +22,8 @@ const { URL } = require('url');
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 const db = cloud.database();
+// 查询指令，用于「待通知」扫描里的 status in [completed, failed]
+const $ = db.command;
 
 const SUNO_API_KEY = process.env.SUNO_API_KEY;
 const SUNO_BASE_URL = process.env.SUNO_BASE_URL || 'https://api.sunoapi.org';
@@ -34,7 +36,7 @@ const MUSIC_CALLBACK_BASE_URL = process.env.MUSIC_CALLBACK_BASE_URL;
 // 云托管 Remotion 渲染服务地址
 const REMOTION_SERVICE_URL =
   process.env.REMOTION_SERVICE_URL ||
-  'https://chat-mv-remotion-288614-10-1459907343.sh.run.tcloudbase.com';
+  'https://chat-mv-remotion-290686-7-1462201626.sh.run.tcloudbase.com';
 
 // ---------------------------------------------------------------------------
 // 音乐风格模板（与 generateMusic/musicStyleDict 保持一致）
@@ -374,6 +376,102 @@ function postToRenderService(taskId) {
 }
 
 // ---------------------------------------------------------------------------
+// 完成通知派发
+// ---------------------------------------------------------------------------
+
+/** 单轮最多派发的通知条数，避免一次执行里堆积过多云函数调用 */
+const NOTIFY_BATCH_SIZE = Number(process.env.NOTIFY_BATCH_SIZE || 20);
+
+/**
+ * sending 占位的过期时长。
+ * sendTaskNotify 发送前会把状态置为 sending 以防并发重复下发，但若该函数在
+ * 云调用途中被平台强杀（超时/OOM），状态就会永久停在 sending、通知再也发不出去。
+ * 超过此时长的 sending 视为僵死，回收成 pending 重新排队。
+ * 取 3 分钟：远大于一次云调用的正常耗时（秒级），也远小于用户的容忍窗口。
+ */
+const NOTIFY_SENDING_STALE_MS = 3 * 60 * 1000;
+
+/**
+ * 回收僵死的 sending 占位，避免通知永久丢失。
+ * 只改 notifyState，不触碰任何生成流程字段。
+ */
+async function reclaimStaleSending(tasksCol) {
+  let reclaimed = 0;
+  try {
+    const res = await tasksCol
+      .where({
+        notifyState: 'sending',
+        updatedAt: $.lt(Date.now() - NOTIFY_SENDING_STALE_MS),
+      })
+      .limit(NOTIFY_BATCH_SIZE)
+      .get();
+
+    for (const t of (Array.isArray(res.data) ? res.data : [])) {
+      try {
+        await tasksCol.doc(t._id).update({
+          data: { notifyState: 'pending', updatedAt: Date.now() },
+        });
+        reclaimed += 1;
+        console.log(`reclaimStaleSending: task ${t._id} 回收为 pending`);
+      } catch (e) {
+        console.error('reclaimStaleSending: 回收失败', t._id, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('reclaimStaleSending: 扫描失败', e.message);
+  }
+  return reclaimed;
+}
+
+/**
+ * 扫描「已到终态但通知尚未下发」的任务，逐个派发 sendTaskNotify。
+ *
+ * 为什么放在本定时器里而不是渲染完成时立即发：
+ *   1. 云托管 Remotion 用 @cloudbase/node-sdk，没有 cloud.openapi 云调用能力；
+ *   2. 失败路径（Suno 敏感词、渲染异常）不经过云托管，只有这里能统一覆盖；
+ *   3. 相对 5~15 分钟的等待，最多 1 分钟的定时器延迟用户完全无感。
+ *
+ * 这里用 cloud.callFunction 是安全的：sendTaskNotify 只做一次云调用，
+ * 远不会碰到「云函数间调用通道约 3 秒超时」的限制（不同于 Suno/LLM 那些长耗时函数）。
+ */
+async function dispatchPendingNotifies(tasksCol) {
+  const result = { scanned: 0, dispatched: 0, reclaimed: 0, errors: [] };
+
+  // 先回收僵死占位，让它们能在本轮就被重新派发
+  result.reclaimed = await reclaimStaleSending(tasksCol);
+
+  try {
+    const res = await tasksCol
+      .where({
+        notifyState: 'pending',
+        status: $.in(['completed', 'failed']),
+      })
+      .limit(NOTIFY_BATCH_SIZE)
+      .get();
+
+    const pending = Array.isArray(res.data) ? res.data : [];
+    result.scanned = pending.length;
+
+    for (const t of pending) {
+      try {
+        // 串行派发：sendTaskNotify 内部有「先占位再发送」的幂等保护，
+        // 串行还能顺带避免瞬时打满云函数并发。
+        await cloud.callFunction({ name: 'sendTaskNotify', data: { taskId: t._id } });
+        result.dispatched += 1;
+      } catch (e) {
+        console.error('dispatchPendingNotifies: 派发失败', t._id, e.message);
+        result.errors.push({ taskId: t._id, message: e.message || 'dispatch failed' });
+      }
+    }
+  } catch (e) {
+    console.error('dispatchPendingNotifies: 扫描失败', e.message);
+    result.errors.push({ message: e.message || 'scan failed' });
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // 任务处理
 // ---------------------------------------------------------------------------
 
@@ -657,6 +755,7 @@ exports.main = async (event = {}) => {
     unknown: 0,
     render_triggered: 0,
     music_submitted: 0,
+    notify: { scanned: 0, dispatched: 0, reclaimed: 0, errors: [] },
     errors: [],
   };
 
@@ -696,6 +795,14 @@ exports.main = async (event = {}) => {
         summary.errors.push({ taskId: tid, message: e.message || 'unknown error' });
         console.error('pollMusicStatus processTask error', tid, e);
       }
+    }
+
+    // ── 完成通知派发 ──
+    // 放在推进逻辑之后：本轮刚被推成 completed/failed 的任务能立刻在这里被扫到，
+    // 少等一个定时器周期。指定 taskId 的单任务调试模式不派发通知，避免调试误发
+    // ——一次性订阅额度只有一次，误发即不可恢复。
+    if (!taskId) {
+      summary.notify = await dispatchPendingNotifies(tasksCol);
     }
 
     return { success: true, data: summary };

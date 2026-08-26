@@ -1,36 +1,37 @@
 /**
  * 聊天气泡预览样式
  * =====================================================================
- * 所有尺寸严格对齐 cloud-run-remotion/src/remotion/animation-config.ts 中的
- * WX_SIZES / WX_COLORS 规范，换算关系：1 iOS pt ≈ 2 rpx。
+ * 视觉标准对齐微信真实观感，同时尽量保持与 Remotion 渲染端一致。
  *
  * 核心规范：
- *   头像: 80rpx (40pt), 圆角: 16rpx (边长 0.2 倍)
- *   头像间距: 20rpx (10pt)
- *   气泡最大宽度: 360rpx (180pt)
- *   气泡圆角: 10rpx (5pt)
- *   气泡内边距: 19rpx 24rpx (9.5pt 12pt)
- *   气泡阴影: 0 4rpx 20rpx rgba(0,0,0,0.06)
- *   正文: 34rpx/17px, color #191919, line-height 1.35, max-width 14em
- *   昵称: 24rpx/12px, color #B2B2B2
- *   时间分隔: 24rpx/12px, color #9A9A9A, 药丸 rgba(0,0,0,0.06)
- *   表情包: 240rpx × 240rpx (120pt), 圆角 10rpx (5pt)
- *   红包/转账卡片: 480rpx (190pt × 1.1)
+ *   头像: 80rpx, 圆角: 16rpx
+ *   头像间距: 16rpx
+ *   气泡最大宽度: 440rpx（更接近微信约 65% 屏宽）
+ *   气泡圆角: 10rpx
+ *   气泡内边距: 19rpx 24rpx
+ *   正文: 34rpx, color #191919, line-height 1.4, max-width 18em
+ *   昵称: 24rpx, color #B2B2B2
+ *   时间分隔: 24rpx, color #9A9A9A
+ *   表情包: 240rpx × 240rpx
+ *   红包/转账卡片: 480rpx
  */
 
-/* ── 行容器：头像 + 内容列 ──────────────────────────────── */
+/* ── 行容器 ────────────────────────────────────────────── */
+/* margin-bottom 仅影响小程序预览列表的疏密，不参与视频输出：
+   渲染端每条气泡是独立容器，纵向位置由 paddingTop/marginBottom
+   配合逐条入场动画决定（见 ChatMVComposition），与此处无关。 */
 .bubble-row {
   display: flex;
   align-items: flex-start;
-  gap: 20rpx;
-  margin-bottom: 30rpx;
+  gap: 16rpx;
+  margin-bottom: 28rpx;
 }
 
 .bubble-row-right {
   flex-direction: row-reverse;
 }
 
-/* ── 头像：统一灰底首字母回退，与 Remotion Avatar 一致 ── */
+/* ── 头像 ──────────────────────────────────────────────── */
 .avatar {
   width: 80rpx;
   height: 80rpx;
@@ -52,11 +53,11 @@
   display: block;
 }
 
-/* ── 内容列：昵称在气泡外 ──────────────────────────────── */
+/* ── 内容列 ────────────────────────────────────────────── */
 .content-col {
   display: flex;
   flex-direction: column;
-  max-width: 360rpx;
+  max-width: 440rpx;
   flex: 0 1 auto;
   min-width: 0;
   align-items: flex-start;
@@ -73,11 +74,11 @@
   color: #B2B2B2;
   line-height: 1.2;
   padding: 0 4rpx;
-  margin-bottom: 8rpx;
+  margin-bottom: 6rpx;
   white-space: nowrap;
 }
 
-/* ── 气泡容器（尖角定位锚点） ───────────────────────────── */
+/* ── 气泡容器 ──────────────────────────────────────────── */
 .bubble-container {
   position: relative;
   min-width: 44rpx;
@@ -90,7 +91,6 @@
   padding: 19rpx 24rpx;
   border-radius: 10rpx;
   background: #FFFFFF;
-
   display: inline-flex;
   flex: 0 1 auto;
 }
@@ -103,14 +103,14 @@
 .bubble-text {
   font-size: 34rpx;
   color: #191919;
-  line-height: 1.35;
+  line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
-  max-width: 14em;
+  max-width: 18em;
   display: inline-block;
 }
 
-/* ── 气泡尖角（CSS border 三角形） ─────────────────────── */
+/* ── 气泡尖角 ─────────────────────────────────────────── */
 .bubble-tail {
   position: absolute;
   top: 30rpx;
@@ -146,7 +146,7 @@
   border-radius: 10rpx;
 }
 
-/* ── 图片表情包 ────────────────────────────────────────── */
+/* ── 图片表情包 ───────────────────────────────────────── */
 .bubble-image {
   width: 240rpx;
   height: 240rpx;

@@ -18,6 +18,7 @@
     "remotion": "^4.0.0"
   },
   "devDependencies": {
+    "@cloudbase/cli": "^3.7.2",
     "@types/express": "^4.17.0",
     "@types/node": "^18.0.0",
     "@types/react": "^18.2.0",

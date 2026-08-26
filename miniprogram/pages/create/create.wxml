@@ -1,43 +1,98 @@
-<view class="page">
-  <view class="card">
-    <text class="field-label">主题 / 人设</text>
-    <textarea
-      class="topic-input"
-      placeholder="例如：绿茶跟前男友对话、搞笑闺蜜互怼…"
-      placeholder-class="placeholder"
-      value="{{topic}}"
-      bindinput="onTopicInput"
-      maxlength="100"
-    />
-  </view>
-
-  <view class="card">
-    <text class="field-label">对话风格</text>
-    <view class="chip-row">
-      <view
-        class="chip {{selectedTone === item ? 'chip-active' : ''}}"
-        wx:for="{{dialogueTones}}"
-        wx:key="*this"
-        data-value="{{item}}"
-        bindtap="selectTone"
-      >{{item}}</view>
+<view class="create-page">
+  <scroll-view class="create-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <!-- ==================== 主题输入 ==================== -->
+    <view class="input-card">
+      <textarea
+        class="topic-input"
+        placeholder="想聊点什么？一句话说清场景，越具体越好"
+        placeholder-class="topic-placeholder"
+        value="{{topic}}"
+        bindinput="onTopicInput"
+        maxlength="{{maxLen}}"
+        cursor-spacing="32"
+        adjust-position
+        show-confirm-bar="{{false}}"
+      />
+      <view class="input-footer">
+        <text class="counter {{topic.length > 80 ? 'counter-warn' : ''}}">{{topic.length}}/{{maxLen}}</text>
+      </view>
     </view>
-  </view>
 
-  <view class="card">
-    <text class="field-label">音乐风格</text>
-    <view class="chip-row">
-      <view
-        class="chip {{selectedGenre === item ? 'chip-active' : ''}}"
-        wx:for="{{musicGenres}}"
-        wx:key="*this"
-        data-value="{{item}}"
-        bindtap="selectGenre"
-      >{{item}}</view>
+    <!-- ==================== 灵感胶囊 ==================== -->
+    <view class="inspire">
+      <view class="inspire-head">
+        <text class="inspire-title">没想法？点一个试试</text>
+      </view>
+      <view class="inspire-wrap">
+        <view
+          class="inspire-chip"
+          wx:for="{{inspirations}}"
+          wx:key="*this"
+          data-value="{{item}}"
+          hover-class="inspire-chip-hover"
+          hover-stay-time="60"
+          bindtap="onPickInspiration"
+        >
+          <text class="inspire-chip-text">{{item}}</text>
+        </view>
+      </view>
     </view>
-  </view>
 
-  <view class="btn-gradient" bindtap="onSubmit">
-    <text>{{submitting ? '生成中…' : '生成对话'}}</text>
+    <!-- ==================== 对话风格 ==================== -->
+    <view class="section">
+      <view class="section-head">
+        <text class="section-title">对话风格</text>
+        <text class="section-note">决定聊天的味道</text>
+      </view>
+      <view class="tone-grid">
+        <view
+          class="tone-item {{selectedTone === item.name ? 'tone-item-on' : ''}}"
+          wx:for="{{dialogueTones}}"
+          wx:key="name"
+          data-value="{{item.name}}"
+          hover-class="tone-item-hover"
+          hover-stay-time="60"
+          bindtap="selectTone"
+        >
+          <text class="tone-name">{{item.name}}</text>
+          <text class="tone-desc">{{item.desc}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- ==================== 音乐风格 ==================== -->
+    <view class="section">
+      <view class="section-head">
+        <text class="section-title">音乐风格</text>
+        <text class="section-note">决定成品的听感</text>
+      </view>
+      <view class="genre-wrap">
+        <view
+          class="genre-chip {{selectedGenre === item ? 'genre-chip-on' : ''}}"
+          wx:for="{{musicGenres}}"
+          wx:key="*this"
+          data-value="{{item}}"
+          hover-class="genre-chip-hover"
+          hover-stay-time="60"
+          bindtap="selectGenre"
+        >
+          <text>{{item}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="scroll-footer"></view>
+  </scroll-view>
+
+  <!-- ==================== 底部提交 ==================== -->
+  <view class="sheet">
+    <view
+      class="btn-primary {{canSubmit ? '' : 'btn-primary-off'}}"
+      hover-class="{{canSubmit ? 'btn-primary-hover' : ''}}"
+      hover-stay-time="60"
+      bindtap="onSubmit"
+    >
+      <text>{{submitting ? '创建中…' : '开始生成对话'}}</text>
+    </view>
   </view>
 </view>

@@ -45,6 +45,10 @@ exports.main = async (event, context) => {
         resultVideoUrl: '',
         errorStage: '',
         errorMsg: '',
+        // 完成通知（一次性订阅消息）状态机，由 confirmDialogue / setTaskNotify 写入，
+        // sendTaskNotify 消费：none → pending → sending → sent / failed
+        notifyState: 'none',
+        notifyTemplateId: '',
         createdAt: now,
         updatedAt: now,
       },

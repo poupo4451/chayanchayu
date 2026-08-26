@@ -1,39 +1,322 @@
+/**
+ * 对话预览页
+ * =====================================================================
+ * 设计令牌（4rpx 网格）：
+ *   横向水槽 32rpx（全页唯一值）｜控件圆角 20rpx｜面板圆角 28rpx｜微圆角 8rpx
+ *   主按钮高 96rpx｜次级按钮高 76rpx
+ *
+ * 视觉分层：顶部（导航栏/角色栏/气泡区）统一灰底 #EDEDED 实现沉浸，
+ *          白色只留给「卡片」层（角色 chip / 交换键 / 底部 Sheet）。
+ *
+ * 注意：气泡本体样式在 components/chat-bubble-preview 中，
+ *      它是最终视频的所见即所得预览，不可改动。
+ */
+
 .preview-page {
-  padding-bottom: 180rpx;
+  /* 覆盖全局 .page 的 padding 60rpx 40rpx 与 min-height，
+     本页用固定视口高 + flex 纵向分区，滚动交给 .bubble-scroll */
+  padding: 0;
+  min-height: 0;
   background: #EDEDED;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
-.bubble-list {
+/* ==================== 顶部角色栏 ====================
+   不设背景色，透出页面灰底，与导航栏、气泡区连成一片，消除白/灰接缝 */
+.role-bar {
+  display: flex;
+  align-items: center;
+  padding: 20rpx 32rpx 4rpx;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+/* 灰底上用白色卡片，与全站「灰画布 + 白卡片」语言一致 */
+.role-chip {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16rpx;
+  padding: 14rpx 20rpx;
+  border-radius: 20rpx;
+  background: #FFFFFF;
+  box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.03);
 }
 
-.action-row {
+/* 右侧反向排列，使两个头像对称环绕中间的交换键 */
+.role-chip-right {
+  flex-direction: row-reverse;
+}
+
+.role-chip-hover {
+  background: #F2F2F2;
+}
+
+.role-avatar {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 14rpx;
+  background: #C6C7CB;
+  flex-shrink: 0;
+  display: block;
+}
+
+.role-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4rpx;
+}
+
+.role-meta-right {
+  align-items: flex-end;
+}
+
+.role-name {
+  font-size: 26rpx;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #1A1A1A;
+  max-width: 180rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role-hint {
+  font-size: 20rpx;
+  line-height: 1.2;
+  color: #A5A5A5;
+}
+
+.role-swap {
+  width: 64rpx;
+  height: 64rpx;
+  margin: 0 16rpx;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.03);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.role-swap-hover {
+  background: #F2F2F2;
+}
+
+.role-swap-icon {
+  width: 30rpx;
+  height: 30rpx;
+}
+
+/* ==================== 操作提示 ==================== */
+.tip-row {
+  display: flex;
+  justify-content: center;
+  padding: 18rpx 32rpx 6rpx;
+  flex-shrink: 0;
+}
+
+.tip-text {
+  font-size: 21rpx;
+  letter-spacing: 0.5rpx;
+  color: #A8A8A8;
+}
+
+/* ==================== 气泡滚动区 ==================== */
+.bubble-scroll {
+  flex: 1;
+  /* flex 子项默认 min-height:auto，内容超长时会撑破父容器而非内部滚动 */
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12rpx 0;
+}
+
+/* 与角色栏、底部面板统一 32rpx 水槽，形成单一竖直基准线 */
+.drag-wrapper {
+  padding: 0 32rpx;
+  transition: transform 0.15s ease;
+  will-change: transform;
+}
+
+/* 拖拽态只改视觉不改盒模型：
+   原实现把 padding 从 0 突变为 16rpx，导致长按瞬间高度跳动，
+   且使 dragItemHeight 测量值与实际不符、影响落点计算。
+   此处不能用 transform，会被 WXML 行内的 translateY 覆盖。 */
+.drag-active {
+  position: relative;
+  z-index: 20;
+  background: #FFFFFF;
+  border-radius: 20rpx;
+  box-shadow: 0 8rpx 28rpx rgba(0, 0, 0, 0.14);
+  transition: none;
+}
+
+/* 底部面板高 240rpx + 呼吸余量，并计入底部安全区 */
+.bubble-scroll-footer {
+  height: calc(300rpx + env(safe-area-inset-bottom));
+}
+
+/* ==================== 骨架屏 ====================
+   对话生成最长可等 60s，用骨架气泡替代单行「加载中…」 */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  padding: 24rpx 32rpx 0;
+}
+
+.sk-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
+}
+
+.sk-row-right {
+  flex-direction: row-reverse;
+}
+
+.sk-avatar {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 16rpx;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.06);
+  animation: sk-pulse 1.4s ease-in-out infinite;
+}
+
+.sk-bubble {
+  height: 84rpx;
+  border-radius: 10rpx;
+  background: rgba(0, 0, 0, 0.06);
+  animation: sk-pulse 1.4s ease-in-out infinite;
+}
+
+.sk-row-right .sk-bubble {
+  animation-delay: 0.2s;
+}
+
+@keyframes sk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.sk-tip {
+  align-self: center;
+  margin-top: 20rpx;
+  font-size: 24rpx;
+  color: #A5A5A5;
+}
+
+/* ==================== 底部操作面板 ====================
+   合并原本的悬浮 add-bar 与 action-row：
+   原实现是透明浮层叠在白色栏上、各带一层阴影，视觉上像未完成的浮层 */
+.sheet {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
+  z-index: 100;
   display: flex;
-  padding: 20rpx 40rpx 40rpx;
+  flex-direction: column;
+  gap: 20rpx;
+  padding: 24rpx 32rpx;
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
   background: #FFFFFF;
-  box-sizing: border-box;
-  border-top: 1px solid var(--border);
-  box-shadow: 0 -4rpx 16rpx rgba(0, 0, 0, 0.04);
+  border-radius: 28rpx 28rpx 0 0;
+  box-shadow: 0 -4rpx 24rpx rgba(0, 0, 0, 0.06);
 }
 
-.btn-outline {
+.sheet-row {
+  display: flex;
+  flex-direction: row;
+  gap: 20rpx;
+}
+
+/* ---- 添加气泡（次级） ---- */
+.add-btn {
+  flex: 1;
+  min-width: 0;
+  height: 76rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  border-radius: 20rpx;
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.add-btn-hover {
+  background: rgba(0, 0, 0, 0.075);
+}
+
+/* 色块直接取气泡真实颜色，与列表所见严格对应 */
+.swatch {
+  width: 26rpx;
+  height: 26rpx;
+  border-radius: 8rpx;
+  flex-shrink: 0;
+}
+
+.swatch-white {
+  background: #FFFFFF;
+  border: 1rpx solid #D5D5D5;
+}
+
+.swatch-green {
+  background: #95EC69;
+}
+
+.add-btn-text {
+  font-size: 24rpx;
+  color: #5A5A5A;
+}
+
+/* ---- 主操作行 ---- */
+.btn-ghost {
+  flex-shrink: 0;
+  height: 96rpx;
+  padding: 0 40rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 88rpx;
-  padding: 0 30rpx;
-  border-radius: 44rpx;
-  border: 1px solid var(--primary);
-  color: var(--primary);
-  font-size: 14px;
-  margin-right: 20rpx;
-  background: transparent;
+  border-radius: 20rpx;
+  background: rgba(0, 0, 0, 0.05);
+  color: #4A4A4A;
+  font-size: 28rpx;
 }
 
-.flex-1 {
+.btn-ghost-hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* 纵向 2% 微渐变代替 135deg 双色渐变：保留体积感，去掉廉价感 */
+.btn-primary {
   flex: 1;
+  height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20rpx;
+  background: linear-gradient(180deg, #00C06B 0%, #00B865 100%);
+  color: #FFFFFF;
+  font-size: 29rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+  box-shadow: 0 6rpx 18rpx rgba(0, 184, 101, 0.24);
+}
+
+.btn-primary-hover {
+  background: linear-gradient(180deg, #00B865 0%, #009A55 100%);
+  box-shadow: 0 2rpx 8rpx rgba(0, 184, 101, 0.28);
 }

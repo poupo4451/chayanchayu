@@ -20,13 +20,16 @@
 }
 
 .tab-icon {
-  font-size: 22px;
-  margin-bottom: 4rpx;
+  width: 44rpx;
+  height: 44rpx;
+  margin-bottom: 6rpx;
 }
 
 .tab-text {
   font-size: 11px;
+  line-height: 1.2;
   color: #999999;
+  transition: color 0.15s ease;
 }
 
 .tab-text-active {

@@ -33,5 +33,8 @@ App({
   globalData: {
     statusBarHeight: 20,
     safeAreaBottom: 0,
+    // 生成完成后由 task-progress 写入，供「我的作品」高亮刚完成的那一条。
+    // 走 globalData 而非 URL query，因为 my-works 是 tabBar 页、switchTab 不支持传参。
+    highlightTaskId: '',
   }
 });

@@ -1,54 +1,58 @@
+/**
+ * 我的作品
+ * =====================================================================
+ * 设计令牌与 create / task-progress 对齐：
+ *   横向水槽 32rpx｜卡片圆角 28rpx｜控件圆角 20rpx｜主按钮高 96rpx
+ * 视觉策略：灰底沉浸 + 白卡片；封面用 3:4（与 MV 成品同比例）建立"视频感"。
+ */
+
 .works-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #EDEDED;
   /* 顶部安全距离由 JS 动态计算后通过 inline style 设置，这里仅保留兜底值 */
   padding-top: 80rpx;
   /* 底部需叠加自定义 tab-bar 高度(110rpx) + 系统底部安全区，避免最后一条被 tab-bar 遮住 */
   padding-bottom: calc(110rpx + env(safe-area-inset-bottom) + 40rpx);
 }
 
-.empty-state {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding-top: 200rpx;
-}
-
-/* ===== 用户信息区 ===== */
-
-.profile-card {
+/* ==================== 用户 / 标题区 ====================
+   与首页 hero 同构：左对齐、不套卡片，让头像成为唯一视觉锚点 */
+.hero {
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 28rpx 30rpx;
-  margin-bottom: 30rpx;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 24rpx;
+  padding: 0 32rpx;
+  /* 下方紧接客服卡片，留出与卡片间的呼吸 */
+  margin-bottom: 28rpx;
 }
 
-/* 圆形头像容器 */
 .avatar-wrapper {
   position: relative;
-  width: 80rpx;
-  height: 80rpx;
+  width: 84rpx;
+  height: 84rpx;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
+  background: #E0E0E0;
 }
 
 .profile-avatar {
-  width: 80rpx;
-  height: 80rpx;
+  width: 84rpx;
+  height: 84rpx;
   border-radius: 50%;
   display: block;
 }
 
-/* 透明按钮覆盖层，用于触发 chooseAvatar */
+/* 透明按钮覆盖层，用于触发 chooseAvatar；尺寸须与头像严格一致 */
 .avatar-btn-overlay {
   position: absolute;
   top: 0;
   left: 0;
-  width: 80rpx;
-  height: 80rpx;
+  width: 84rpx;
+  height: 84rpx;
   padding: 0;
   margin: 0;
   border-radius: 50%;
@@ -62,92 +66,208 @@
   border: none;
 }
 
-.profile-avatar-empty {
-  background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.profile-avatar-text {
-  font-size: 48rpx;
-  line-height: 1;
-}
-
-.profile-info {
+.hero-meta {
   display: flex;
   flex-direction: column;
-  margin-left: 24rpx;
+  margin-left: 20rpx;
   flex: 1;
   min-width: 0;
+  gap: 6rpx;
 }
 
-.profile-nickname-row {
-  display: flex;
-  flex-direction: column;
-}
-
-.profile-nickname {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-main);
-  height: 48rpx;
-  line-height: 48rpx;
-  padding: 0;
-  margin-bottom: 0;
-  background: transparent;
-}
-
-.profile-count {
-  font-size: 13px;
-  color: var(--text-sub);
-  font-weight: 500;
-}
-
-/* ===== 作品卡片 ===== */
-
-.work-card {
+.hero-name-row {
   display: flex;
   flex-direction: row;
   align-items: center;
+  gap: 14rpx;
+  min-width: 0;
+}
+
+.hero-name {
+  font-size: 31rpx;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #1A1A1A;
+  max-width: 380rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-name-empty {
+  font-weight: 400;
+  color: #B2B2B2;
+}
+
+/* 显式「编辑」入口：原实现只能靠猜测点击昵称 */
+.hero-edit {
+  flex-shrink: 0;
+  padding: 3rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 19rpx;
+  color: #8A8A8A;
+}
+
+.hero-count {
+  font-size: 23rpx;
+  color: #A8A8A8;
+}
+
+/* ==================== 客服入口 ====================
+   位于 hero 与列表之间的浅色入口：3% 黑底、无阴影，
+   弱于白色作品卡片，不与作品争夺注意力。 */
+
+/* 外层容器只负责水槽，使入口左缘与作品卡片严格对齐。
+   align-items:flex-start 让胶囊按内容高度收缩、并靠左排列 */
+.contact-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0 32rpx;
+  /* 下方紧接分组标题（自带 12rpx 上间距），此处 16rpx 合计 28rpx */
+  margin-bottom: 16rpx;
+  flex-shrink: 0;
+}
+
+/* 胶囊本体是普通 view：布局与视觉完全可控，
+   不受 button 内置 UA 样式（margin:auto 等）干扰 */
+.contact-pill {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 16rpx 22rpx 16rpx 20rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.contact-pill-hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* 透明触发层：唯一职责是承载 open-type="contact"。
+   绝对定位铺满胶囊，故其自带 margin/尺寸样式均不再影响布局。
+   与 .avatar-btn-overlay 的 chooseAvatar 同一手法。 */
+.contact-hit {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 999rpx;
+  background: transparent;
+  opacity: 0;
+}
+
+.contact-hit::after {
+  content: none;
+  border: none;
+}
+
+/* 用 CSS 画对话气泡，避免为一个小入口引入图片资源。
+   底色用中性灰而非品牌绿：这是弱入口，绿色会让它跳出来抢作品的注意力 */
+.contact-bubble {
+  position: relative;
+  width: 26rpx;
+  height: 21rpx;
+  flex-shrink: 0;
+  margin-right: 12rpx;
+  border-radius: 6rpx;
+  background: #B0B0B0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 3rpx;
+}
+
+/* 左下角小尖角 */
+.contact-bubble::after {
+  content: '';
+  position: absolute;
+  left: 5rpx;
+  bottom: -4rpx;
+  width: 0;
+  height: 0;
+  border-left: 6rpx solid #B0B0B0;
+  border-top: 4rpx solid transparent;
+  border-bottom: 4rpx solid transparent;
+}
+
+.contact-dot {
+  width: 3rpx;
+  height: 3rpx;
+  border-radius: 50%;
+  background: #FFFFFF;
+}
+
+/* 字重与颜色均弱于作品标题（29rpx/600/#1A1A1A），保持「辅助入口」的层级 */
+.contact-title {
+  font-size: 24rpx;
+  font-weight: 400;
+  line-height: 1;
+  color: #7A7A7A;
+  white-space: nowrap;
+}
+
+/* ==================== 分组标题 ==================== */
+.group {
+  padding: 12rpx 32rpx 14rpx;
+}
+
+.group-text {
+  font-size: 22rpx;
+  letter-spacing: 2rpx;
+  color: #A8A8A8;
+}
+
+/* ==================== 左滑删除 ==================== */
+.swipe-item {
+  position: relative;
+  margin: 0 32rpx 16rpx;
+  display: flex;
+  align-items: center;
+  transition: opacity 0.2s ease, max-height 0.2s ease, margin-bottom 0.2s ease;
+  max-height: 240rpx; /* 略大于实际卡片高度（144rpx 封面 + 上下 20rpx padding），作为退场动画基准 */
+  overflow: hidden;
+}
+
+.swipe-item-exiting {
+  opacity: 0;
+  max-height: 0;
   margin-bottom: 0;
 }
 
-.work-card-pending {
-  opacity: 0.88;
-}
-
-/* 左滑删除 */
-.swipe-item {
-  position: relative;
-  margin-bottom: 20rpx;
-  display: flex;
-  align-items: center;
-}
-
+/* 圆角色块 + 文字。右侧留出 16rpx，让色块与卡片右边缘之间有呼吸，
+   不做整块贴边；文字用 justify-content 居中而非靠右挤，避免视觉上"歪"。
+   宽度 = 可见色块 116rpx + 与卡片的间距 16rpx。 */
 .swipe-delete {
   position: absolute;
-  right: 48rpx;
+  right: 0;
   top: 0;
   bottom: 0;
-  margin: auto 0;
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 50%;
-  background: #FF4D4F;
+  width: 116rpx;
+  border-radius: 24rpx;
+  background: #E74C3C;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   opacity: 0;
   transition: opacity 0.2s ease;
   z-index: 0;
 }
 
-.swipe-delete-icon {
-  font-size: 28rpx;
-  color: #fff;
-  font-weight: 700;
-  line-height: 1;
+.swipe-delete-text {
+  font-size: 24rpx;
+  font-weight: 500;
+  color: #FFFFFF;
 }
 
 .swipe-card-wrap {
@@ -156,30 +276,55 @@
   width: 100%;
 }
 
-.work-cover {
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 12rpx;
-  background: #00B865;
-  margin-right: 20rpx;
+/* ==================== 作品卡片 ==================== */
+.work-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  /* 右侧略大于左侧：文本区右边缘不再有箭头收边，多留一点避免长标题顶到边 */
+  padding: 20rpx 28rpx 20rpx 20rpx;
+  border-radius: 28rpx;
+  background: #FFFFFF;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.03);
+}
+
+/* ---- 封面占位：3:4 绿底 + 居中小 icon ----
+   比例取 MV 成品（720x960）的 3:4，竖版轮廓本身就在传达「这是个视频」；
+   不用视频首帧：MV 开头是黑场，取帧几乎全黑、没有信息量。
+   icon 为透明底纯白图形（见 images/work-cover-icon.svg），
+   自带底色会与此处渐变叠出色差，故 SVG 内不保留背景矩形。 */
+.cover {
+  position: relative;
+  width: 108rpx;
+  height: 144rpx;
   flex-shrink: 0;
+  margin-right: 24rpx;
+  border-radius: 14rpx;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  /* 单色改为极轻的纵向渐变：纯色大面积在 3:4 上会显得扁 */
+  background: linear-gradient(165deg, #00C46E 0%, #00B865 55%, #00A85C 100%);
 }
 
-.work-cover-img {
-  width: 120rpx;
-  height: 120rpx;
+.cover-img {
+  width: 70rpx;
+  height: 70rpx;
+  display: block;
 }
 
-.work-cover-spinner {
-  width: 28rpx;
-  height: 28rpx;
+/* 进行中 / 失败态改用浅灰底，让「未完成」在列表里一眼可辨 */
+.cover-task {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.cover-spinner {
+  width: 30rpx;
+  height: 30rpx;
   border-radius: 50%;
-  border: 3rpx solid rgba(255, 255, 255, 0.35);
-  border-top-color: #ffffff;
+  border: 3rpx solid rgba(0, 0, 0, 0.1);
+  border-top-color: #00B865;
   animation: work-spin 0.8s linear infinite;
 }
 
@@ -188,58 +333,351 @@
   to { transform: rotate(360deg); }
 }
 
-.work-info {
+.cover-fail {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 50%;
+  background: rgba(231, 76, 60, 0.12);
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-fail-icon {
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1;
+  color: #E74C3C;
+}
+
+/* ---- 文本区 ---- */
+.work-body {
   flex: 1;
   min-width: 0;
-  height: 120rpx;
-}
-
-.work-header {
   display: flex;
   flex-direction: column;
+  gap: 12rpx;
 }
 
+.work-title-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+/* flex 容器内的 text 必须显式 min-width:0 才能正常省略 */
 .work-title {
-  font-size: 15px;
+  flex: 1;
+  min-width: 0;
+  font-size: 29rpx;
   font-weight: 600;
+  line-height: 1.3;
+  color: #1A1A1A;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.work-duration {
-  font-size: 12px;
-  color: var(--text-hint);
+.work-new {
+  flex-shrink: 0;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 184, 101, 0.14);
+  color: #00964F;
+  font-size: 18rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
 }
 
-.work-time {
-  font-size: 12px;
-  color: var(--text-hint);
+.work-meta {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10rpx;
+  min-width: 0;
 }
 
-.work-status-row {
+/* 时长用微色块承载，替代原先与创建时间同色同号、难以区分的做法 */
+.work-dot-tag {
+  flex-shrink: 0;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 20rpx;
+  color: #7A7A7A;
+  font-variant-numeric: tabular-nums;
+}
+
+.work-meta-sep {
+  font-size: 20rpx;
+  color: #C8C8C8;
+}
+
+.work-meta-text {
+  font-size: 21rpx;
+  color: #A8A8A8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-stage {
+  flex-shrink: 0;
+  font-size: 21rpx;
+  font-weight: 500;
+  color: #00964F;
+}
+
+.work-stage-fail {
+  color: #C0392B;
+}
+
+/* 进度条：与进度页同款 4rpx 细轨，形成跨页一致的"进度"语言 */
+.mini-track {
+  height: 4rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 0, 0, 0.07);
+  overflow: hidden;
+}
+
+.mini-fill {
+  height: 100%;
+  border-radius: 999rpx;
+  background: #00B865;
+  transition: width 0.4s ease;
+}
+
+.work-retry-hint {
+  font-size: 20rpx;
+  color: #B5B5B5;
+}
+
+/* ==================== 新作品高亮 ====================
+   进度页完成后跳回本页，用一圈渐隐的绿环把「刚生成好的那条」指出来。
+   用 inset 内描边而非外扩阴影：.swipe-item 有 overflow:hidden，
+   外扩阴影会被左右裁掉；内描边也与创作页 .tone-item-on 的手法一致。
+   动画时长需与 my-works.js 的 HIGHLIGHT_MS 保持一致。 */
+.work-card-highlight {
+  animation: work-highlight 2.8s ease-out both;
+}
+
+@keyframes work-highlight {
+  0%, 55% {
+    box-shadow: inset 0 0 0 3rpx rgba(0, 184, 101, 0.6);
+    background: rgba(0, 184, 101, 0.05);
+  }
+  100% {
+    box-shadow: inset 0 0 0 3rpx rgba(0, 184, 101, 0);
+    background: #FFFFFF;
+  }
+}
+
+/* ==================== 骨架屏 ==================== */
+.sk-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin: 0 32rpx 16rpx;
+  padding: 20rpx;
+  border-radius: 28rpx;
+  background: #FFFFFF;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.03);
+}
+
+.sk-cover {
+  width: 108rpx;
+  height: 144rpx;
+  flex-shrink: 0;
+  margin-right: 24rpx;
+  border-radius: 14rpx;
+  background: rgba(0, 0, 0, 0.06);
+  animation: sk-pulse 1.4s ease-in-out infinite;
+}
+
+.sk-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.sk-line {
+  height: 24rpx;
+  border-radius: 8rpx;
+  background: rgba(0, 0, 0, 0.06);
+  animation: sk-pulse 1.4s ease-in-out infinite;
+}
+
+.sk-line-lg { width: 68%; }
+.sk-line-sm { width: 38%; animation-delay: 0.2s; }
+
+@keyframes sk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* ==================== 空状态 ====================
+   给出明确 CTA，替代原先一句「快去创作一个吧～」的死胡同 */
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 120rpx 60rpx 0;
+}
+
+/* 用四根静态声波柱作插画，呼应「声音」主题且零图片成本 */
+.empty-art {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  height: 96rpx;
+  margin-bottom: 40rpx;
+}
+
+.empty-bar {
+  width: 12rpx;
+  margin-right: 12rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 184, 101, 0.28);
+  animation: empty-wave 1.6s ease-in-out infinite;
+}
+
+.empty-bar-1 { height: 34rpx; }
+.empty-bar-2 { height: 72rpx; animation-delay: 0.2s; }
+.empty-bar-3 { height: 50rpx; animation-delay: 0.4s; }
+.empty-bar-4 { height: 88rpx; margin-right: 0; animation-delay: 0.6s; }
+
+@keyframes empty-wave {
+  0%, 100% { transform: scaleY(1); opacity: 0.9; }
+  50% { transform: scaleY(0.5); opacity: 0.5; }
+}
+
+.empty-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #1A1A1A;
+  margin-bottom: 14rpx;
+}
+
+.empty-text {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #A8A8A8;
+  text-align: center;
+  margin-bottom: 48rpx;
+}
+
+.empty-btn {
+  height: 96rpx;
+  padding: 0 64rpx;
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  justify-content: center;
+  border-radius: 20rpx;
+  background: linear-gradient(180deg, #00C06B 0%, #00B865 100%);
+  color: #FFFFFF;
+  font-size: 29rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+  box-shadow: 0 6rpx 18rpx rgba(0, 184, 101, 0.24);
 }
 
-.work-status-badge {
-  font-size: 11px;
-  padding: 4rpx 14rpx;
-  border-radius: 999px;
-  background: rgba(0, 184, 101, 0.12);
-  color: #00B865;
+.empty-btn-hover {
+  background: linear-gradient(180deg, #00B865 0%, #009A55 100%);
+  box-shadow: 0 2rpx 8rpx rgba(0, 184, 101, 0.28);
 }
 
-.work-status-badge-failed {
-  background: rgba(255, 87, 87, 0.18);
-  color: #FF6B6B;
+/* ==================== 昵称编辑弹窗 ==================== */
+.nickname-modal-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 900;
 }
 
-.work-status-progress {
-  font-size: 11px;
-  color: var(--text-sub);
+.nickname-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 901;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.nickname-modal-content {
+  width: 600rpx;
+  background: #FFFFFF;
+  border-radius: 28rpx;
+  padding: 40rpx 36rpx 32rpx;
+  box-shadow: 0 12rpx 40rpx rgba(0, 0, 0, 0.16);
+  pointer-events: auto;
+}
+
+.nickname-modal-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #1A1A1A;
+  text-align: center;
+  margin-bottom: 28rpx;
+}
+
+.nickname-modal-input {
+  width: 100%;
+  height: 92rpx;
+  padding: 0 24rpx;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 20rpx;
+  font-size: 29rpx;
+  color: #1A1A1A;
+  box-sizing: border-box;
+  margin-bottom: 28rpx;
+}
+
+.nickname-modal-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 20rpx;
+}
+
+.nickname-modal-btn {
+  flex: 1;
+  height: 92rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20rpx;
+  font-size: 29rpx;
+  font-weight: 500;
+}
+
+.nickname-modal-btn-cancel {
+  background: rgba(0, 0, 0, 0.05);
+  color: #5A5A5A;
+}
+
+.nickname-modal-btn-cancel:active {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.nickname-modal-btn-confirm {
+  background: linear-gradient(180deg, #00C06B 0%, #00B865 100%);
+  color: #FFFFFF;
+  font-weight: 600;
+  box-shadow: 0 6rpx 18rpx rgba(0, 184, 101, 0.24);
+}
+
+.nickname-modal-btn-confirm:active {
+  background: linear-gradient(180deg, #00B865 0%, #009A55 100%);
 }

@@ -141,16 +141,33 @@ body {
 
 .progress {
   flex: 1;
-  height: 3px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 0 1px;
+}
+
+/* 实际轨道（居中） */
+.progress-track {
+  width: 100%;
+  height: 4px;
   background: var(--border);
   border-radius: 2px;
   overflow: hidden;
+  transition: height 0.12s;
+}
+
+.progress:hover .progress-track,
+.progress:active .progress-track {
+  height: 6px;
 }
 
 .progress-fill {
   height: 100%;
   background: var(--accent);
   border-radius: 2px;
+  pointer-events: none;
 }
 
 .timecode {

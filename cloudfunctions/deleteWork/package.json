@@ -1,4 +1,9 @@
 {
   "name": "deleteWork",
-  "dependencies": {}
+  "version": "1.0.0",
+  "description": "删除作品或任务，清理关联云存储文件",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
 }

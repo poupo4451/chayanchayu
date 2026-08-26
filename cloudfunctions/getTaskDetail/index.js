@@ -47,6 +47,8 @@ exports.main = async (event) => {
         resultVideoUrl: task.resultVideoUrl,
         errorStage: task.errorStage,
         errorMsg: task.errorMsg,
+        // 供进度页同步「完成通知」开关的显示状态（none/pending/sent/failed）
+        notifyState: task.notifyState || 'none',
       },
     };
   } catch (e) {

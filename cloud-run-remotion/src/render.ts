@@ -6,7 +6,7 @@ import { bundle } from '@remotion/bundler';
 import { selectComposition, renderMedia } from '@remotion/renderer';
 import * as tcb from '@cloudbase/node-sdk';
 import { BubbleData } from './remotion/ChatBubble';
-import { computeBubbleTimings, LineMapEntry, LyricLine, LyricWord } from './lyricsAlign';
+import { computeBubbleTimings, LineMapEntry, LyricLine, LyricWord, MIN_GAP_FRAMES } from './lyricsAlign';
 
 // 渲染服务必须与小程序、云函数和 Cloud Run 部署目标使用同一个环境。
 const ENV_ID = 'cloud1-d7ggdqfhgc4ee2796';
@@ -276,54 +276,104 @@ async function getActualAudioDuration(audioPath: string): Promise<number | null>
 }
 
 /**
- * 三级降级策略获取第一句歌词的起唱时间（秒）。
- * 🥇 lyricsTimeline[0].startS — Suno 行级时间戳
+ * 逐级降级获取第一句歌词的起唱时间（秒）。
+ * 🥇 lyricsTimeline 中第一条 startS > 0 且有实际歌词文本的行 — Suno 行级时间戳
+ *    （跳过 [Intro]/[Instrumental]/空行等前奏标记行）
  * 🥈 lyricsWords[0].s — Suno 词级时间戳
- * 🥉 第一个气泡 startFrame 反推 — 最后兜底
+ * 🥉 第一个气泡 startFrame 反推 — 仅当气泡时间来自真实对齐时可用
  * 返回 null 表示没有可用的起唱时间数据。
+ *
+ * @param allowBubbleInference uniform 降级时必须传 false。
+ *   均匀分配的气泡帧号是「编排」出来的（含人造的 intro 留白），
+ *   不代表任何真实演唱时刻；拿它反推前奏会把开头的人声当前奏裁掉。
  */
 function getFirstLyricStartSeconds(
   timeline?: LyricLine[],
   words?: LyricWord[],
   bubblesTimed?: BubbleData[],
+  allowBubbleInference = true,
 ): number | null {
-  if (timeline && timeline.length > 0 && typeof timeline[0].startS === 'number' && timeline[0].startS > 0) {
-    return timeline[0].startS;
+  if (timeline && timeline.length > 0) {
+    // 跳过前奏标记行（startS 为 0 或文本为空），找第一条真正起唱的行
+    for (const line of timeline) {
+      if (typeof line.startS === 'number' && line.startS > 0 && line.text.trim().length > 0) {
+        console.log(`🎵 getFirstLyricStartSeconds: found in timeline[${line.lineIndex}] "${line.text}" at ${line.startS}s`);
+        return line.startS;
+      }
+    }
+    console.log(`🎵 getFirstLyricStartSeconds: timeline has ${timeline.length} lines, none with startS>0 and text`);
   }
   if (words && words.length > 0 && typeof words[0].s === 'number' && words[0].s > 0) {
+    console.log(`🎵 getFirstLyricStartSeconds: found in words[0] "${words[0].w}" at ${words[0].s}s`);
     return words[0].s;
   }
-  if (bubblesTimed && bubblesTimed.length > 0 && typeof bubblesTimed[0].startFrame === 'number' && bubblesTimed[0].startFrame > 0) {
-    return bubblesTimed[0].startFrame / RENDER_FPS;
+  if (!allowBubbleInference) {
+    console.log('🎵 getFirstLyricStartSeconds: uniform strategy → skip bubble inference (frames are synthetic)');
+    return null;
   }
+  if (bubblesTimed && bubblesTimed.length > 0 && typeof bubblesTimed[0].startFrame === 'number' && bubblesTimed[0].startFrame > 0) {
+    const secs = bubblesTimed[0].startFrame / RENDER_FPS;
+    console.log(`🎵 getFirstLyricStartSeconds: fallback to bubble[0].startFrame/${RENDER_FPS} = ${secs.toFixed(1)}s`);
+    return secs;
+  }
+  // 🏅 策略4：即使气泡无 timeline 均匀分布，从气泡间距也能推测前奏
+  // 当多条气泡且第一条与第二条间隔 > 2 秒时，可能有纯音乐前奏
+  if (bubblesTimed && bubblesTimed.length >= 2) {
+    const f1 = bubblesTimed[0].startFrame ?? 0;
+    const f2 = bubblesTimed[1].startFrame ?? 0;
+    if (f2 > f1 + RENDER_FPS * 2) {
+      const secs = f1 / RENDER_FPS;
+      console.log(`🎵 getFirstLyricStartSeconds: inferred from bubble[0]=${f1}f bubble[1]=${f2}f gap > 2s, returning ${secs.toFixed(1)}s`);
+      return secs;
+    }
+  }
+  console.log('🎵 getFirstLyricStartSeconds: no usable data, returning null');
   return null;
 }
 
 /**
- * 用 ffmpeg 裁剪音频前奏，从 trimPoint 秒处截取到结束。
- * 返回裁剪后的文件路径；失败返回 null，调用方应回退到原音频。
+ * 从 timeline 获取最后一句歌词的结束时间（秒）。
+ * 遍历所有行取最大 endS，跳过前奏/空行。
  */
-function trimAudioIntro(audioPath: string, trimPoint: number): string | null {
-  try {
-    const trimmed = path.join('/tmp', `audio_trimmed_${Date.now()}.mp3`);
-    // -ss 在 -i 前面做 input seeking，速度快；-c copy 不重新编码
-    execSync(
-      `ffmpeg -y -ss ${trimPoint} -i "${audioPath}" -c copy "${trimmed}"`,
-      { timeout: 60000, stdio: 'pipe' },
-    );
-    console.log(`🎵 ffmpeg trim done: ${trimmed}`);
-    return trimmed;
-  } catch (e) {
-    console.warn('trimAudioIntro failed:', e instanceof Error ? e.message : String(e));
-    return null;
+function getLastLyricEndSeconds(timeline?: LyricLine[]): number | null {
+  if (!timeline || timeline.length === 0) return null;
+  let maxEnd = 0;
+  for (const line of timeline) {
+    if (typeof line.endS === 'number' && line.endS > maxEnd && line.text.trim().length > 0) {
+      maxEnd = line.endS;
+    }
   }
+  if (maxEnd > 0) {
+    console.log(`🎵 getLastLyricEndSeconds: max endS = ${maxEnd}s`);
+    return maxEnd;
+  }
+  console.log('🎵 getLastLyricEndSeconds: no valid endS found in timeline');
+  return null;
+}
+
+/**
+ * 最后一个气泡「入场动画播完」的时间（秒）。
+ * ChatMVComposition：start = startFrame - anticipation(0.5s)，
+ * 入场时长最长 ENTER_FRAMES.maxFrames = 22 帧，
+ * 故动画结束 ≈ startFrame + (22-15) 帧 ≈ startFrame + 0.25s，取 0.3s 兜底。
+ * 注意最后一组的 group.end = totalFrames + TAIL_MARGIN，退场动画不会播，
+ * 这里只考虑入场。
+ */
+function getLastBubbleAnimEndSeconds(bubbles: BubbleData[]): number | null {
+  let maxFrame = 0;
+  for (const b of bubbles) {
+    const f = b.startFrame ?? 0;
+    if (f > maxFrame) maxFrame = f;
+  }
+  if (maxFrame <= 0) return null;
+  const secs = maxFrame / RENDER_FPS + 0.3;
+  console.log(`🎵 getLastBubbleAnimEndSeconds: ${secs.toFixed(1)}s`);
+  return secs;
 }
 
 export async function renderTask(taskId: string): Promise<void> {
   console.log(`starting render for task ${taskId}`);
   await setStage(taskId, 'starting', 80);
-
-  let trimmedAudioPath: string | null = null;
 
   try {
     const taskRes = await db.collection('tasks').doc(taskId).get();
@@ -386,73 +436,131 @@ export async function renderTask(taskId: string): Promise<void> {
     const bubblesTimed = timed.bubbles;
     console.log('lyrics alignment:', JSON.stringify(timed.report));
 
-    // ── 🎵 前奏裁剪：第一句歌词起唱太晚时，自动裁剪音频前奏 ─────────
-    const INTRO_TRIM_THRESHOLD = 2.0;   // 第一句歌词 ≥2s 才触发裁剪
-    const INTRO_ANIMATION_BUFFER = 0.5; // 入场动画缓冲
-    const INTRO_BREATHING_BUFFER = 0.3; // 呼吸感缓冲
+    // ── 🎵 音频时间窗计算：裁前奏 + 掐尾巴 ──────────────────────────
+    // 只算出 [introTrimS, tailCutoffS) 这个窗口，不碰音频文件本身，
+    // 由 <Audio trimBefore> + composition durationInFrames 落地。
+    const INTRO_TRIM_THRESHOLD = 1.0;
+    const INTRO_LEAD_IN = 0.3;
+    const INTRO_FADE_IN_S = 0.3;     // 裁前奏后的淡入（落在 lead-in 内，不碰人声）
+    const TAIL_HOLD_S = 0.3;         // 唱完后原音量定格 0.3 秒
+    const TAIL_FADE_DURATION = 2.0;
+    const TAIL_BUFFER = TAIL_HOLD_S + TAIL_FADE_DURATION; // 2.3s
+    const TAIL_MIN_SAVED = 0.3;
 
+    const originalDuration = audioDuration;
+
+    console.log(
+      `🎵 diagnostics: timeline=${task.lyricsTimeline?.length ?? 0} lines, ` +
+      `words=${task.lyricsWords?.length ?? 0}, bubbles=${bubblesTimed.length}, ` +
+      `audioDuration=${originalDuration.toFixed(1)}s, totalFrames=${totalFrames}`,
+    );
+    if (task.lyricsTimeline?.length) {
+      console.log('🎵 diagnostics: head =',
+        task.lyricsTimeline.slice(0, 2).map((l) => `[${l.lineIndex}]"${l.text}" ${l.startS}~${l.endS}`));
+      console.log('🎵 diagnostics: tail =',
+        task.lyricsTimeline.slice(-2).map((l) => `[${l.lineIndex}]"${l.text}" ${l.startS}~${l.endS}`));
+    }
+
+    // uniform 降级时气泡帧号是「编排」出来的，不代表真实演唱时刻，
+    // 不能用它反推前奏/尾奏，否则会把开头人声当前奏裁掉、或提前掐断结尾。
+    const isUniform = timed.report.strategy === 'uniform';
+
+    // 1) 前奏起点
+    let introTrimS = 0;
     const firstLyricStartS = getFirstLyricStartSeconds(
       task.lyricsTimeline,
       task.lyricsWords,
       bubblesTimed,
+      !isUniform,
     );
-
-    let audioTrimApplied = false;
-
     if (firstLyricStartS != null && firstLyricStartS >= INTRO_TRIM_THRESHOLD) {
-      const trimPoint = Math.max(0, firstLyricStartS - INTRO_ANIMATION_BUFFER - INTRO_BREATHING_BUFFER);
-      const frameOffset = Math.round(trimPoint * RENDER_FPS);
-
+      introTrimS = Math.max(0, firstLyricStartS - INTRO_LEAD_IN);
+    } else {
       console.log(
-        `🎵 trimming intro: first lyric at ${firstLyricStartS.toFixed(1)}s, ` +
-        `trim point at ${trimPoint.toFixed(1)}s, offset ${frameOffset} frames`,
-      );
-
-      // 偏移所有气泡帧号
-      for (const b of bubblesTimed) {
-        b.startFrame = Math.max(0, (b.startFrame ?? 0) - frameOffset);
-        b.endFrame = Math.max((b.startFrame ?? 0) + 1, (b.endFrame ?? 0) - frameOffset);
-      }
-      // 偏移 beats（歌词起唱帧）
-      if (timed.beats && timed.beats.length > 0) {
-        timed.beats = timed.beats.map((f) => Math.max(0, f - frameOffset));
-      }
-
-      // 更新音频时长
-      audioDuration = Math.max(1, audioDuration - trimPoint);
-      audioTrimApplied = true;
-
-      console.log(
-        `🎵 after trim: audioDuration=${audioDuration.toFixed(1)}s, ` +
-        `first bubble startFrame=${bubblesTimed[0]?.startFrame}`,
+        `🎵 intro trim skipped: firstLyricStart=${firstLyricStartS ?? 'null'} ` +
+        `(threshold ${INTRO_TRIM_THRESHOLD}s)`,
       );
     }
 
-    // Remotion 的 <Audio> 组件支持直接使用可访问的 http(s) URL，
-    // 渲染器会下载并混入音轨。之前把音频下载到容器 /tmp 后传入本地绝对路径，
-    // 会被 Remotion 的静态服务当成相对路径请求 localhost:3001/tmp/... 导致 404。
+    // 2) 尾巴终点：淡出锚点 = max(最后一句唱完, 最后气泡入场动画播完)
+    //    只取气泡会切断最后那句歌词，只取歌词在无 timeline 时拿不到值，必须取 max。
+    let tailCutoffS = originalDuration;
+    const lyricEndS = getLastLyricEndSeconds(task.lyricsTimeline);
+    // uniform 下气泡尾帧是编排值（含人造 outro 留白），不能作为掐尾依据
+    const bubbleAnimEndS = isUniform ? null : getLastBubbleAnimEndSeconds(bubblesTimed);
+    const animEndS = lyricEndS != null && bubbleAnimEndS != null
+      ? Math.max(lyricEndS, bubbleAnimEndS)
+      : (lyricEndS ?? bubbleAnimEndS);
+
+    if (animEndS != null) {
+      const cut = Math.min(originalDuration, animEndS + TAIL_BUFFER);
+      if (cut < originalDuration - TAIL_MIN_SAVED && cut > introTrimS + 2) {
+        tailCutoffS = cut;
+        console.log(
+          `🎵 tail trim: lyricEnd=${lyricEndS?.toFixed(1) ?? 'null'}s, ` +
+          `bubbleAnimEnd=${bubbleAnimEndS?.toFixed(1) ?? 'null'}s → ` +
+          `animEnd=${animEndS.toFixed(1)}s, cut=${cut.toFixed(1)}s ` +
+          `(saved ${(originalDuration - cut).toFixed(1)}s, hold ${TAIL_HOLD_S}s + fade ${TAIL_FADE_DURATION}s)`,
+        );
+      } else {
+        console.log(
+          `🎵 tail trim skipped: cut=${cut.toFixed(1)}s vs ` +
+          `duration=${originalDuration.toFixed(1)}s (saved=${(originalDuration - cut).toFixed(1)}s, min=${TAIL_MIN_SAVED}s)`,
+        );
+      }
+    } else {
+      console.log('🎵 tail trim skipped: no animation end data');
+    }
+
+    // 3) 落地成帧
+    const frameOffset = Math.round(introTrimS * RENDER_FPS);
+    audioDuration = Math.max(1, tailCutoffS - introTrimS);
+    const finalFrames = Math.ceil(audioDuration * RENDER_FPS);
+
+    if (frameOffset > 0) {
+      // ⚠️ 旧实现用 Math.max(0, shifted) 压平：所有 startFrame < frameOffset 的
+      // 气泡全被压到 0，单调递增和最小间隔同时失效，首组多条气泡同帧堆叠且
+      // 因为 anticipation 已经跑完而完全没有入场动画。这里改为保序推开。
+      let prev = -Infinity;
+      for (const b of bubblesTimed) {
+        const shifted = (b.startFrame ?? 0) - frameOffset;
+        b.startFrame = Math.max(shifted, prev + MIN_GAP_FRAMES, 0);
+        prev = b.startFrame;
+        b.endFrame = Math.min(
+          finalFrames,
+          Math.max(b.startFrame + 1, (b.endFrame ?? 0) - frameOffset),
+        );
+      }
+      // beats 必须 filter 掉负值，不能 clamp 成 0，否则开头会堆一坨节拍
+      timed.beats = (timed.beats || [])
+        .map((f) => f - frameOffset)
+        .filter((f) => f >= 0);
+    }
+    timed.beats = (timed.beats || []).filter((f) => f <= finalFrames);
+
+    const audioTrimBefore = frameOffset;
+    // 淡入只在真的裁了前奏时才需要（消硬切爆音）；从 0 开始播的原始音频不需要
+    const audioFadeInFrames = introTrimS > 0
+      ? Math.min(Math.round(INTRO_FADE_IN_S * RENDER_FPS), Math.floor(finalFrames / 4))
+      : 0;
+    const audioFadeOutFrames = tailCutoffS < originalDuration - 0.01
+      ? Math.min(Math.round(TAIL_FADE_DURATION * RENDER_FPS), Math.floor(finalFrames / 2))
+      : 0;
+
+    console.log(
+      `🎵 audio window: [${introTrimS.toFixed(1)}s → ${tailCutoffS.toFixed(1)}s] ` +
+      `of ${originalDuration.toFixed(1)}s | duration=${audioDuration.toFixed(1)}s ` +
+      `frames=${finalFrames} trimBefore=${audioTrimBefore}f ` +
+      `fadeIn=${audioFadeInFrames}f fadeOut=${audioFadeOutFrames}f ` +
+      `| firstBubble=${bubblesTimed[0]?.startFrame} beats=${timed.beats.length}`,
+    );
+
+    // ── 音频：始终把 URL 直接交给 Remotion，绝不传容器本地路径 ──────────
+    // Remotion 只能加载 http(s) URL 或 public/ 下的文件（staticFile），
+    // /tmp/xxx.mp3 会被解析成 bundle 根目录的相对路径而 404。
     let audioPath: string | null = null;
     if (audioUrl) {
-      if (audioUrl.startsWith('http')) {
-        // 需要裁剪前奏时，必须先下载到本地才能用 ffmpeg 裁剪
-        audioPath = audioTrimApplied ? await downloadAudio(audioUrl) : audioUrl;
-      } else {
-        // cloud:// 等非 http 资源仍需下载到本地
-        audioPath = await downloadAudio(audioUrl);
-      }
-
-      // 执行前奏裁剪
-      if (audioTrimApplied && audioPath && !audioPath.startsWith('http') && firstLyricStartS != null) {
-        const trimPoint = Math.max(0, firstLyricStartS - INTRO_ANIMATION_BUFFER - INTRO_BREATHING_BUFFER);
-        const trimmed = trimAudioIntro(audioPath, trimPoint);
-        if (trimmed) {
-          audioPath = trimmed;
-          trimmedAudioPath = trimmed;
-          console.log(`🎵 audio intro trimmed at ${trimPoint.toFixed(1)}s`);
-        } else {
-          console.warn('⚠️ audio trim failed, using original audio (intro will contain silence)');
-        }
-      }
+      audioPath = audioUrl.startsWith('http') ? audioUrl : await downloadAudio(audioUrl);
     }
     await setStage(taskId, 'audio_ready');
 
@@ -465,6 +573,9 @@ export async function renderTask(taskId: string): Promise<void> {
       bubbles: bubblesTimed,
       audioPath: audioPath || '',
       audioDuration,
+      audioTrimBefore,
+      audioFadeInFrames,
+      audioFadeOutFrames,
       // 每句歌词的起唱帧，供画面做节奏律动
       beats: timed.beats,
       // 流派用于挑选气泡入场动画池（嘻哈更 punchy，抒情类更柔和）
@@ -521,15 +632,22 @@ export async function renderTask(taskId: string): Promise<void> {
       updatedAt: Date.now(),
     });
 
-    await db.collection('works').add({
-      taskId,
-      userId: task.userId,
-      title: task.topic,
-      videoUrl: fileId,
-      duration: audioDuration,
-      style: task.style,
-      createdAt: Date.now(),
-    });
+    // 去重：同一个 taskId 只写一条 works 记录，防止重复渲染
+    const existRes = await db.collection('works').where({ taskId }).limit(1).get();
+    const alreadyExists = (existRes.data || []).length > 0;
+    if (!alreadyExists) {
+      await db.collection('works').add({
+        taskId,
+        userId: task.userId,
+        title: task.topic,
+        videoUrl: fileId,
+        duration: audioDuration,
+        style: task.style,
+        createdAt: Date.now(),
+      });
+    } else {
+      console.log(`works record already exists for task ${taskId}, skipping duplicate`);
+    }
 
     console.log(`render complete for task ${taskId}`);
   } catch (err) {
@@ -550,7 +668,6 @@ export async function renderTask(taskId: string): Promise<void> {
     try {
       if (fs.existsSync(OUTPUT_PATH)) fs.unlinkSync(OUTPUT_PATH);
       if (fs.existsSync(AUDIO_PATH)) fs.unlinkSync(AUDIO_PATH);
-      if (trimmedAudioPath && fs.existsSync(trimmedAudioPath)) fs.unlinkSync(trimmedAudioPath);
     } catch {
       // ignore cleanup errors
     }

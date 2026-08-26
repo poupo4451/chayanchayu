@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Player, type PlayerRef } from '@remotion/player';
 import { PreviewRoot } from './PreviewRoot';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from '@remotion-components/wxTheme';
@@ -6,9 +6,11 @@ import { DEMO_PRESETS, FPS, DURATION_FRAMES, DURATION_SEC } from './mock/demoPre
 
 const App: React.FC = () => {
   const playerRef = useRef<PlayerRef>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
   const [presetIdx, setPresetIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [frame, setFrame] = useState(0);
+  const [scrubFrame, setScrubFrame] = useState<number | null>(null);
 
   const current = DEMO_PRESETS[presetIdx] ?? DEMO_PRESETS[0];
 
@@ -46,6 +48,34 @@ const App: React.FC = () => {
     p.play();
   };
 
+  // ── 进度条拖拽 / 点击跳转 ──────────────────────
+  const calcFrameFromEvent = useCallback((e: MouseEvent | React.MouseEvent) => {
+    const el = progressRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    return Math.round(ratio * DURATION_FRAMES);
+  }, []);
+
+  const handleProgressMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const targetFrame = calcFrameFromEvent(e);
+    setScrubFrame(targetFrame);
+    playerRef.current?.seekTo(targetFrame);
+
+    const onMove = (ev: MouseEvent) => {
+      const f = calcFrameFromEvent(ev);
+      setScrubFrame(f);
+      playerRef.current?.seekTo(f);
+    };
+    const onUp = () => {
+      setScrubFrame(null);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [calcFrameFromEvent]);
+
   const switchPreset = (idx: number) => {
     setPresetIdx(idx);
     // 切预设后自动从头播
@@ -58,13 +88,14 @@ const App: React.FC = () => {
     }
   };
 
-  const seconds = (frame / FPS).toFixed(1);
+  const displayFrame = scrubFrame ?? frame;
+  const seconds = (displayFrame / FPS).toFixed(1);
 
   return (
     <div className="app">
       <header className="topbar">
         <h1>
-          茶言茶曲 <span>动画预览</span>
+          言语生声 <span>动画预览</span>
         </h1>
         <div className="preset-picker">
           {DEMO_PRESETS.map((pre, i) => (
@@ -110,14 +141,16 @@ const App: React.FC = () => {
         <button onClick={toggle} title={playing ? '暂停' : '播放'}>
           {playing ? '⏸' : '▶'}
         </button>
-        <div className="progress">
-          <div
-            className="progress-fill"
-            style={{ width: `${((frame / DURATION_FRAMES) * 100).toFixed(2)}%` }}
-          />
+        <div className="progress" ref={progressRef} onMouseDown={handleProgressMouseDown}>
+          <div className="progress-track">
+            <div
+              className="progress-fill"
+              style={{ width: `${((displayFrame / DURATION_FRAMES) * 100).toFixed(2)}%` }}
+            />
+          </div>
         </div>
         <span className="timecode">
-          {seconds}s / {DURATION_SEC}s · 帧 {frame}
+          {seconds}s / {DURATION_SEC}s · 帧 {displayFrame}
         </span>
       </footer>
 

@@ -15,7 +15,7 @@ const db = cloud.database();
 // 与当前 CloudBase 环境的 chat-mv-remotion 服务保持一致；环境变量可用于显式覆盖。
 const REMOTION_SERVICE_URL =
   process.env.REMOTION_SERVICE_URL ||
-  'https://chat-mv-remotion-288614-10-1459907343.sh.run.tcloudbase.com';
+  'https://chat-mv-remotion-290686-7-1462201626.sh.run.tcloudbase.com';
 
 function postToRenderService(taskId) {
   if (!REMOTION_SERVICE_URL) {
@@ -63,9 +63,27 @@ exports.main = async (event) => {
     return { success: false, message: '缺少 taskId 参数' };
   }
 
+  const openid = cloud.getWXContext().OPENID || '';
   const tasksCol = db.collection('tasks');
 
   try {
+    // ── 客户端调用的前置校验（服务端定时器 pollMusicStatus 无 OPENID，直接放行）──
+    // 云托管 Remotion 渲染按 CPU/时长计费，必须确认调用者是任务所有者，
+    // 且该任务已在 confirmDialogue 正常扣过每日额度。
+    if (openid) {
+      const taskRes = await tasksCol.doc(taskId).get();
+      const task = taskRes.data;
+      if (!task) {
+        return { success: false, message: '任务不存在' };
+      }
+      if (task.userId !== openid) {
+        return { success: false, code: 'FORBIDDEN', message: '无权操作此任务' };
+      }
+      if (!task.quotaDateKey) {
+        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起生成' };
+      }
+    }
+
     const result = await postToRenderService(taskId);
     // 状态保持 rendering_video，等云托管渲染完后更新为 completed
     return {

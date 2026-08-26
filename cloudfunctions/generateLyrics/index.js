@@ -54,17 +54,20 @@ function resolveGenre(genre) {
   return genre;
 }
 
-/** 过滤掉 "time" 类型（时间跳转条，没有实际唱词内容），保留原始 dialogue 下标 */
+/** 过滤掉 "time"（时间条）和 "image"（表情包）类型，这些不需要唱词，保留原始 dialogue 下标 */
 function getSingableEntries(dialogue) {
   return (dialogue || [])
     .map((d, index) => ({ ...d, _originalIndex: index }))
-    .filter((d) => (d.type || 'text') !== 'time');
+    .filter((d) => {
+      const type = d.type || 'text';
+      return type !== 'time' && type !== 'image';
+    });
 }
 
-/** 每条对话的兜底唱词：LLM 缺行/漏行/完全失败时用它保证「行数=对话数」这条硬约束 */
+/** 每条对话的兜底唱词：LLM 缺行/漏行/完全失败时用它保证「行数=对话数」这条硬约束。
+ *  表情包（image）已在 getSingableEntries 中过滤，此处不再处理。 */
 function fallbackLine(entry) {
   const type = entry.type || 'text';
-  if (type === 'image') return `${entry.name || '有人'}丢来一个表情包`;
   if (type === 'redpacket') {
     return `${entry.name || '有人'}发了个红包${entry.text ? `，写着${entry.text}` : ''}`.trim();
   }
@@ -74,12 +77,12 @@ function fallbackLine(entry) {
   return (entry.text || '').trim() || '沉默了几秒';
 }
 
-// 带本地序号（0..N-1，不含 time 条目）的清单，供 LLM 逐条对应改写
+// 带本地序号（0..N-1，不含 time/image 条目）的清单，供 LLM 逐条对应改写
+// 表情包（image）已在 getSingableEntries 中过滤，此处不再处理
 function formatSingableList(entries) {
   return entries
     .map((d, i) => {
       const type = d.type || 'text';
-      if (type === 'image') return `[${i}] 〔${d.name}发了一个表情包〕`;
       if (type === 'redpacket') {
         const amount = d.params && d.params.amount;
         return `[${i}] 〔${d.name}发了一个红包${amount ? `，金额${amount}元` : ''}${d.text ? `，留言"${d.text}"` : ''}〕`;
@@ -123,7 +126,7 @@ ${list}
 3. 内容、情节、语义要紧贴对应那条对话本身，不能编造原对话里没有的情节。
 4. **副歌允许重复**：选出对话里情感最强烈、最有记忆点的 2~4 条作为副歌 hook，在 sections 里让它们重复 1~2 次。副歌行的内容必须和 lines 里对应的行完全一致（从 lines 里原样引用行号，不要重写内容）。
 5. 严禁把对话中任何说话人的昵称/称呼原样写进歌词正文。
-6. 「〔〕」标注的是特殊消息（表情包/红包/转账），用一句简短唱词描述这个动作或它带来的情绪即可。${cantoneseNote}
+6. 「〔〕」标注的是特殊消息（红包/转账），用一句简短唱词描述这个动作或它带来的情绪即可。${cantoneseNote}
 7. 严格输出 JSON 对象，不要输出任何解释、说明或 markdown 代码块标记。
 
 输出 JSON 格式（lines 数组长度必须严格等于 ${n}）：
@@ -296,11 +299,28 @@ exports.main = async (event) => {
     return { success: false, message: '缺少 taskId 参数' };
   }
 
+  const openid = cloud.getWXContext().OPENID || '';
   const tasksCol = db.collection('tasks');
 
   try {
     const taskRes = await tasksCol.doc(taskId).get();
     const task = taskRes.data;
+
+    if (!task) {
+      return { success: false, message: '任务不存在' };
+    }
+
+    // ── 客户端调用的前置校验（服务端函数调用无 OPENID，直接放行）──
+    // 本函数会把任务推进到 generating_music，是付费链路的入口之一，
+    // 因此要求调用者是任务所有者且任务已在 confirmDialogue 合法扣过每日额度。
+    if (openid) {
+      if (task.userId !== openid) {
+        return { success: false, code: 'FORBIDDEN', message: '无权操作此任务' };
+      }
+      if (!task.quotaDateKey) {
+        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起生成' };
+      }
+    }
 
     const genre = resolveGenre(task.style && task.style.musicGenre);
     const genderInfo = assignSpeakerGenders(task.dialogue);

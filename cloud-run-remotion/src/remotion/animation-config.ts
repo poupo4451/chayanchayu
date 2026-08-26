@@ -120,37 +120,108 @@ export const HERO_VARIANT_POOL: EnterVariant[] = ['flyIn', 'tumble3d', 'warp', '
 export const ENTER_FRAMES = {
   /** gapFrames 的最小 clamp 值 */
   gapMin: 4,
-  /** 基准公式：round(min(22, max(8, 6 + gap * k))) */
-  k: 0.9,
+  /** 基准公式：round(min(9, max(3, 3 + gap * k))) */
+  k: 0.375,
   /** 结果上限 */
-  maxFrames: 22,
+  maxFrames: 9,
   /** 结果下限 */
-  minFrames: 8,
+  minFrames: 3,
   /** 截距 */
-  intercept: 6,
+  intercept: 3,
 } as const;
 
 /** 动态退场时长（帧）映射函数参数 */
 export const EXIT_FRAMES = {
   gapMin: 4,
-  k: 0.6,
-  maxFrames: 16,
-  minFrames: 6,
-  intercept: 4,
+  k: 0.25,
+  maxFrames: 6,
+  minFrames: 3,
+  intercept: 2,
+} as const;
+
+/**
+ * 常驻律动参数 —— 消灭「入场播完到退场开始之间」的冻帧。
+ *
+ * 【为什么需要这一层】
+ * 入场动画结束后 enterRaw 被 clamp 到 1，退场又要等到组末尾才开始，
+ * 中间这段时间画面逐帧完全相同。组跨度最长可达数秒，静止占比可以到 80%+，
+ * 观感就是「视频播到一半就没动画了」。
+ *
+ * 这一层让任何时刻画面都在动，由四个互不相关的分量叠加：
+ *   1. beatPunch  —— 随鼓点瞬时弹跳（有 beats 数据时）
+ *   2. breathe    —— 自呼吸正弦（没有 beats 数据时的兜底生命感）
+ *   3. creep      —— Ken-Burns 慢推，长镜头也在持续变化
+ *   4. drift      —— X/Y 异频慢漂，避免线性平移的机械感
+ */
+export const IDLE_MOTION = {
+  /** 节拍能量衰减系数，越小余韵越长 */
+  beatDecay: 2.2,
+  /** 鼓点瞬时弹跳幅度（缩放比例增量） */
+  beatPunch: 0.024,
+  /** 自呼吸频率（Hz） */
+  breatheHz: 1.55,
+  /** 自呼吸幅度（缩放比例增量） */
+  breatheAmp: 0.007,
+  /** Ken-Burns 每秒推进比例 */
+  creepPerSecond: 0.0065,
+  /** Ken-Burns 累计上限，防止长驻组被推得过大 */
+  creepMax: 0.05,
+  /** 慢漂频率（Hz），X/Y 取不同值避免同相位 */
+  driftXHz: 0.42,
+  driftYHz: 0.33,
+  /** 慢漂幅度（px） */
+  driftXPx: 7,
+  driftYPx: 9,
+  /**
+   * 长停留自适应增强。
+   *
+   * 【为什么需要】气泡稀疏时（典型：uniform 降级下 20 条台词撑 120 秒，
+   * 平均 6 秒一条）组停留可达 8~30 秒。这个长度压不掉 —— 靠拆分组会让
+   * Hero 占比冲到 90%+，反而退回「全片 Hero 独占」的老毛病。
+   * 所以改为让律动强度随停留时长自适应：停得越久，呼吸和慢漂越明显，
+   * 长镜头也能保持可察觉的运动。
+   */
+  /** 超过这个停留秒数开始增强 */
+  boostAfterS: 3,
+  /** 增强到满档所需的额外秒数 */
+  boostRampS: 9,
+  /** 满档时的强度倍数（作用于呼吸幅度与慢漂幅度） */
+  boostMaxMultiplier: 1.7,
+} as const;
+
+/**
+ * 长驻气泡的二次脉冲（re-accent）参数。
+ * 气泡停留超过 afterSeconds 后，每逢鼓点自己轻微 pop 一下，
+ * 把「入场完了就再也不动」的长镜头救活。
+ */
+export const RE_ACCENT = {
+  /** 停留超过多少秒后启用二次脉冲 */
+  afterSeconds: 1.5,
+  /** 节拍能量衰减系数（比 idle 更陡，脉冲更短促） */
+  beatDecay: 5.5,
+  /** 脉冲缩放幅度 */
+  scale: 0.03,
+  /** 脉冲旋转幅度（度），相邻气泡方向相反 */
+  rotate: 0.85,
 } as const;
 
 // ============================================================
 // 3. 动画强度 / 幅度参数
 // ============================================================
 
-/** 能量映射：amp = energyOffset + energy * energyK */
+/**
+ * 能量映射：amp = energyOffset + energy * energyK
+ *
+ * 区间从旧的 0.75~1.25 加宽到 0.62~1.57：旧区间几乎恒定，
+ * 位移/旋转幅度看不出能量差异，鼓点再密动作也一个样。
+ */
 export const ENERGY_MAP = {
-  offset: 0.75,
-  k: 0.5,
+  offset: 0.62,
+  k: 0.95,
 } as const;
 
 /** 透明度衰减速：fade = power2Out(min(t * fadeSpeed, 1)) */
-export const FADE_SPEED = 1.45;
+export const FADE_SPEED = 2.5;
 
 /** 各变体的具体数值参数 */
 export const VARIANT_PARAMS = {
@@ -159,7 +230,7 @@ export const VARIANT_PARAMS = {
     backOvershoot: 0.5,
   },
   slide: {
-    distanceX: 160, // px
+    distanceX: 107, // px (160 * 720/1080)
     scaleFrom: 0.94,
   },
   flip: {
@@ -168,12 +239,12 @@ export const VARIANT_PARAMS = {
     backOvershoot: 1.02,
   },
   blurUp: {
-    distanceY: 70, // px
+    distanceY: 47, // px (70 * 720/1080)
     blurMax: 14, // px
     blurSpeed: 1.6,
   },
   elastic: {
-    distanceY: -90, // px
+    distanceY: -60, // px (-90 * 720/1080)
     scaleYFrom: 0.82,
     elasticAmplitude: 0.7,
     elasticPeriod: 0.55,
@@ -201,11 +272,11 @@ export const VARIANT_PARAMS = {
     glowMax: 16,
   },
   slideUp: {
-    distanceY: 200, // px, 从底部进入
+    distanceY: 133, // px (200 * 720/1080), 从底部进入
     blurMax: 10, // px
   },
   bounce: {
-    distanceY: -220, // px, 从上方弹跳下落
+    distanceY: -147, // px (-220 * 720/1080), 从上方弹跳下落
     scaleFrom: 0.55,
   },
   zoomOut: {
@@ -225,7 +296,7 @@ export const VARIANT_PARAMS = {
     scaleFrom: 0.55,
   },
   slideDown: {
-    distanceY: -200, // px, 从上方滑入
+    distanceY: -133, // px (-200 * 720/1080), 从上方滑入
     scaleFrom: 0.88,
     blurMax: 8, // px
   },
@@ -234,7 +305,7 @@ export const VARIANT_PARAMS = {
     backOvershoot: 0.45,
   },
   dropIn: {
-    distanceY: -300, // px, 从高处坠落
+    distanceY: -200, // px (-300 * 720/1080), 从高处坠落
     scaleFrom: 0.5,
   },
   glowIn: {
@@ -465,7 +536,7 @@ export const GROUP_MAX_SPAN_S = 8;
 export const GROUP_MAX_GAP_S = 3.5;
 
 /** 每组场景缩放范围（伪随机取值，切换组时产生推拉镜头感） */
-export const GROUP_SCALE_RANGE = { min: 0.75, max: 0.95 } as const;
+export const GROUP_SCALE_RANGE = { min: 0.82, max: 0.95 } as const;
 
 // ============================================================
 // 5. Hero 气泡参数
@@ -488,8 +559,8 @@ export const FLASH_AMOUNT = {
 // 6. 视觉 / 主题参数
 // ============================================================
 
-export const CANVAS_WIDTH = 1080;
-export const CANVAS_HEIGHT = 1920;
+export const CANVAS_WIDTH = 720;
+export const CANVAS_HEIGHT = 960;
 
 const IPHONE_LOGICAL_WIDTH = 375;
 const ZOOM = 1.35;
@@ -506,7 +577,7 @@ export const FONT_FAMILY =
 export const WX_COLORS = {
   canvas: '#222222',
   bubbleSelf: '#95EC69',
-  bubbleOther: '#FFFFFF',
+  bubbleOther: '#F3F3F3',
   textBody: '#191919',
   textName: '#B2B2B2',
   timeText: '#9A9A9A',
@@ -533,14 +604,26 @@ export const WX_SIZES = {
   tailW: pt(6),
   tailH: pt(11),
   tailTop: pt(15),
-  nameSize: pt(12),
-  nameGap: pt(4),
   bodySize: pt(17),
   timeSize: pt(12),
   imageSide: pt(120),
   imageRadius: pt(5),
   payCardWidth: pt(190),
 } as const;
+
+/**
+ * 单条气泡容器固定宽度（scale=1时的默认宽度，单位px）。
+ * 计算方式：avatar + avatarGap + bubbleMaxWidth + 近头像侧padding + 远头像侧padding
+ * 远头像侧padding沿用 chatBg 旧规则：(avatar + avatarGap + nearPad) × 1.2
+ * CONTAINER_NEAR_PAD 需与 ChatBubble.containerStyle 的 paddingLeft/Right 保持一致。
+ */
+export const CONTAINER_NEAR_PAD = 30;
+export const CONTAINER_WIDTH =
+  WX_SIZES.avatar +
+  WX_SIZES.avatarGap +
+  WX_SIZES.bubbleMaxWidth +
+  CONTAINER_NEAR_PAD +
+  Math.round((WX_SIZES.avatar + WX_SIZES.avatarGap + CONTAINER_NEAR_PAD) * 1.2);
 
 export const WX_LINE_HEIGHT = 1.35;
 
@@ -571,6 +654,8 @@ export interface AnimationConfig {
   heroVariantPool: string[];
   enterFrames: typeof ENTER_FRAMES;
   exitFrames: typeof EXIT_FRAMES;
+  idleMotion: typeof IDLE_MOTION;
+  reAccent: typeof RE_ACCENT;
   energyMap: typeof ENERGY_MAP;
   fadeSpeed: number;
   variantParams: Record<string, Record<string, number>>;
@@ -611,6 +696,8 @@ export function getDefaultConfig(): AnimationConfig {
     heroVariantPool: [...HERO_VARIANT_POOL],
     enterFrames: { ...ENTER_FRAMES },
     exitFrames: { ...EXIT_FRAMES },
+    idleMotion: { ...IDLE_MOTION },
+    reAccent: { ...RE_ACCENT },
     energyMap: { ...ENERGY_MAP },
     fadeSpeed: FADE_SPEED,
     variantParams: JSON.parse(JSON.stringify(VARIANT_PARAMS)),

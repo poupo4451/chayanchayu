@@ -42,11 +42,20 @@ function assignSpeakerGenders(dialogue) {
     let gender = guess.get(name);
     if (!gender) {
       gender = toggle % 2 === 0 ? 'male' : 'female';
-      toggle += 1;
     }
     finalGender.set(name, gender);
+    toggle += 1;
   });
 
+  // 若所有说话人性别一致，按首次出现顺序强制交替男女
+  const allGenders = [...new Set(speakerOrder.map((n) => finalGender.get(n)))];
+  if (speakerOrder.length >= 2 && allGenders.length === 1) {
+    speakerOrder.forEach((name, i) => {
+      finalGender.set(name, i % 2 === 0 ? 'male' : 'female');
+    });
+  }
+
+  // 兜底：前两位若仍同性别，至少保证前两位不同
   if (speakerOrder.length >= 2) {
     const g0 = finalGender.get(speakerOrder[0]);
     const g1 = finalGender.get(speakerOrder[1]);

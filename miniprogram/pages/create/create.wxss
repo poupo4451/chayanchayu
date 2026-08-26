@@ -1,47 +1,247 @@
-.field-label {
-  display: block;
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 20rpx;
-  color: var(--text-main);
+/**
+ * 创作页（第一步：输入主题与风格）
+ * =====================================================================
+ * 设计令牌与对话预览页保持一致：
+ *   横向水槽 32rpx｜控件圆角 20rpx｜卡片圆角 28rpx｜主按钮高 96rpx
+ *   顶部灰底沉浸（导航栏同色），白色只用于「卡片」层
+ */
+
+.create-page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #EDEDED;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.create-scroll {
+  flex: 1;
+  /* flex 子项默认 min-height:auto，内容超长会撑破父容器而非内部滚动 */
+  min-height: 0;
+}
+
+/* ==================== 主题输入 ==================== */
+/* 标题区已移除，引导文案并入 placeholder，此处自行留出顶部呼吸间距 */
+.input-card {
+  margin: 32rpx 32rpx 0;
+  padding: 28rpx 28rpx 16rpx;
+  border-radius: 28rpx;
+  background: #FFFFFF;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.03);
 }
 
 .topic-input {
   width: 100%;
-  min-height: 160rpx;
-  background: var(--bg-card);
-  border-radius: 16rpx;
-  padding: 20rpx;
-  font-size: 14px;
-  color: var(--text-main);
+  min-height: 176rpx;
+  font-size: 30rpx;
+  line-height: 1.5;
+  color: #1A1A1A;
   box-sizing: border-box;
-  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);
 }
 
-.placeholder {
-  color: var(--text-hint);
+.topic-placeholder {
+  color: #C2C2C2;
+  font-size: 28rpx;
+  line-height: 1.5;
 }
 
-.chip-row {
+.input-footer {
   display: flex;
+  justify-content: flex-end;
+  padding-top: 8rpx;
+}
+
+.counter {
+  font-size: 22rpx;
+  color: #C2C2C2;
+}
+
+/* 接近 maxlength 硬上限前给出预警，避免"突然打不动" */
+.counter-warn {
+  color: #E8912D;
+}
+
+/* ==================== 灵感胶囊 ==================== */
+.inspire {
+  margin-top: 36rpx;
+  padding: 0 32rpx;
+}
+
+.inspire-head {
+  margin-bottom: 18rpx;
+}
+
+.inspire-title {
+  font-size: 24rpx;
+  color: #999999;
+}
+
+.inspire-wrap {
+  display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
+  gap: 16rpx;
 }
 
-.chip {
-  padding: 14rpx 32rpx;
-  border-radius: 32rpx;
-  background: var(--bg-card);
-  color: var(--text-sub);
-  font-size: 14px;
-  margin-right: 16rpx;
-  margin-bottom: 16rpx;
-  border: 1px solid var(--border);
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.03);
+.inspire-chip {
+  padding: 14rpx 24rpx;
+  border-radius: 20rpx;
+  background: rgba(0, 0, 0, 0.04);
 }
 
-.chip-active {
-  background: linear-gradient(135deg, #00B865 0%, #009A55 100%);
+.inspire-chip-hover {
+  background: rgba(0, 184, 101, 0.12);
+}
+
+.inspire-chip-text {
+  font-size: 24rpx;
+  color: #5A5A5A;
+}
+
+/* ==================== 通用分区 ==================== */
+.section {
+  margin-top: 44rpx;
+  padding: 0 32rpx;
+}
+
+.section-head {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 14rpx;
+  margin-bottom: 20rpx;
+}
+
+.section-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #1A1A1A;
+}
+
+.section-note {
+  font-size: 22rpx;
+  color: #A8A8A8;
+}
+
+/* ==================== 对话风格（主选项，带说明） ==================== */
+.tone-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+/* 两列自适应：(100% - gap) / 2 */
+.tone-item {
+  width: calc((100% - 16rpx) / 2);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 20rpx;
+  background: #FFFFFF;
+  box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.03);
+}
+
+.tone-item-hover {
+  background: #F2F2F2;
+}
+
+.tone-item-on {
+  background: rgba(0, 184, 101, 0.1);
+  box-shadow: inset 0 0 0 2rpx #00B865;
+}
+
+.tone-name {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #1A1A1A;
+}
+
+.tone-item-on .tone-name {
+  color: #00964F;
+}
+
+.tone-desc {
+  font-size: 21rpx;
+  color: #A8A8A8;
+}
+
+.tone-item-on .tone-desc {
+  color: rgba(0, 150, 79, 0.7);
+}
+
+/* ==================== 音乐风格 ==================== */
+.genre-wrap {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.genre-chip {
+  padding: 18rpx 32rpx;
+  border-radius: 20rpx;
+  background: #FFFFFF;
+  font-size: 26rpx;
+  color: #5A5A5A;
+  box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.03);
+}
+
+.genre-chip-hover {
+  background: #F2F2F2;
+}
+
+.genre-chip-on {
+  background: #00B865;
   color: #FFFFFF;
-  border-color: transparent;
-  box-shadow: 0 4rpx 16rpx rgba(0, 184, 101, 0.25);
+  box-shadow: 0 4rpx 14rpx rgba(0, 184, 101, 0.24);
+}
+
+/* 底部 Sheet 高度 144rpx + 呼吸余量，并计入底部安全区 */
+.scroll-footer {
+  height: calc(200rpx + env(safe-area-inset-bottom));
+}
+
+/* ==================== 底部提交 ==================== */
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  padding: 24rpx 32rpx;
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+  background: #FFFFFF;
+  border-radius: 28rpx 28rpx 0 0;
+  box-shadow: 0 -4rpx 24rpx rgba(0, 0, 0, 0.06);
+}
+
+/* 纵向 2% 微渐变代替 135deg 双色渐变 */
+.btn-primary {
+  height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20rpx;
+  background: linear-gradient(180deg, #00C06B 0%, #00B865 100%);
+  color: #FFFFFF;
+  font-size: 29rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+  box-shadow: 0 6rpx 18rpx rgba(0, 184, 101, 0.24);
+}
+
+.btn-primary-hover {
+  background: linear-gradient(180deg, #00B865 0%, #009A55 100%);
+  box-shadow: 0 2rpx 8rpx rgba(0, 184, 101, 0.28);
+}
+
+/* 未填主题时置灰，替代"点了才 toast 报错" */
+.btn-primary-off {
+  background: #DCDCDC;
+  color: #FFFFFF;
+  box-shadow: none;
 }

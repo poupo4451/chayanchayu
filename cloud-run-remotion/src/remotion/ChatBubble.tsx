@@ -1,6 +1,6 @@
 import React from 'react';
 import { Img, staticFile } from 'remotion';
-import { FONT_FAMILY, WX_COLOR, WX_SIZE, WX_LINE_HEIGHT } from './wxTheme';
+import { FONT_FAMILY, WX_COLOR, WX_SIZE, WX_LINE_HEIGHT, CONTAINER_WIDTH, CONTAINER_NEAR_PAD } from './wxTheme';
 
 export interface BubbleData {
   index: number;
@@ -35,10 +35,10 @@ export interface BubbleData {
 }
 
 /**
- * 单条微信消息（头像 + 昵称 + 气泡）。
+ * 单条微信消息（头像 + 气泡）。
  *
- * 所有尺寸/颜色都来自 wxTheme 的 pt 规范，本文件不出现任何魔法数字，
- * 这样「字体与气泡图形的大小比例」始终等于 iOS 微信真机。
+ * 容器内部所有尺寸固定（类似 iOS pt 体系），外部通过缩放适配视频画面。
+ * 容器自带灰底（#EDEDED），容器组不再渲染底色。
  */
 
 /** 头像：圆角为边长的 0.2 倍；有 avatarId 且素材存在则显示图片，否则回退首字母色块。 */
@@ -100,49 +100,24 @@ const BubbleTail: React.FC<{ side: 'left' | 'right'; color: string }> = ({ side,
   );
 };
 
-/** 整行：头像 + 内容列；自己的消息整行反向 */
-function rowStyle(isSelf: boolean): React.CSSProperties {
+/** 容器行：固定宽度，头像 + 气泡内容，自带灰底 */
+function containerStyle(isSelf: boolean): React.CSSProperties {
   return {
+    width: CONTAINER_WIDTH,
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: isSelf ? 'row-reverse' : 'row',
     alignItems: 'flex-start',
     gap: WX_SIZE.avatarGap,
     fontFamily: FONT_FAMILY,
+    paddingLeft: CONTAINER_NEAR_PAD,
+    paddingRight: CONTAINER_NEAR_PAD,
+    paddingTop: 40,
+    paddingBottom: 40,
+    backgroundColor: '#EDEDED',
+    borderRadius: 4,
   };
 }
-
-/** 内容列（昵称在气泡外，微信群聊风格） */
-const ContentColumn: React.FC<{
-  isSelf: boolean;
-  name: string;
-  maxWidth: number;
-  children: React.ReactNode;
-}> = ({ isSelf, name, maxWidth, children }) => (
-  <div
-    style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: isSelf ? 'flex-end' : 'flex-start',
-      maxWidth,
-      flex: '0 1 auto',
-      minWidth: 0,
-    }}
-  >
-    <span
-      style={{
-        fontSize: WX_SIZE.nameSize,
-        color: WX_COLOR.textName,
-        lineHeight: 1.2,
-        marginBottom: WX_SIZE.nameGap,
-        padding: `0 ${Math.round(WX_SIZE.nameGap / 2)}px`,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {name}
-    </span>
-    {children}
-  </div>
-);
 
 /**
  * PayCard（红包/转账橙色卡片）
@@ -170,17 +145,9 @@ const PayCard: React.FC<{ payType: 'redpacket' | 'transfer'; role: 'left' | 'rig
 
 export const ChatBubble: React.FC<{
   data: BubbleData;
-  /**
-   * 气泡最大宽度相对 WX_SIZE.bubbleMaxWidth 的缩放系数（默认 1）。
-   * Hero 独占时刻会整组再放大 ~1.2 倍，若气泡本身已贴着安全宽度上限，
-   * 放大后必然冲出 1080px 画布——这里让 Hero 模式传入 <1 的系数提前收窄，
-   * 为放大动画预留安全边距。
-   */
-  maxWidthScale?: number;
-}> = ({ data, maxWidthScale = 1 }) => {
+}> = ({ data }) => {
   const isSelf = (data.role || 'left') === 'right';
   const bubbleColor = isSelf ? WX_COLOR.bubbleSelf : WX_COLOR.bubbleOther;
-  const maxWidth = WX_SIZE.bubbleMaxWidth * maxWidthScale;
 
   // ── 时间分隔药丸 ────────────────────────────────
   if (data.type === 'time') {
@@ -204,14 +171,16 @@ export const ChatBubble: React.FC<{
   // ── 表情包 / 图片（微信图片消息无气泡底、无尖角） ──
   if (data.type === 'image') {
     return (
-      <div style={{ padding: 32, backgroundColor: '#EDEDED' }}>
-        <div style={rowStyle(isSelf)}>
-          <Avatar name={data.name} avatarId={data.avatarId} />
+      <div style={containerStyle(isSelf)}>
+        <Avatar name={data.name} avatarId={data.avatarId} />
+        <div style={{ maxWidth: WX_SIZE.imageSide, flex: '0 1 auto', minWidth: 0 }}>
           <img
             src={data.params.imageUrl || ''}
             style={{
-              width: WX_SIZE.imageSide,
-              height: WX_SIZE.imageSide,
+              width: '100%',
+              maxWidth: WX_SIZE.imageSide,
+              height: 'auto',
+              aspectRatio: '1',
               borderRadius: WX_SIZE.imageRadius,
               objectFit: 'cover',
               display: 'block',
@@ -225,9 +194,9 @@ export const ChatBubble: React.FC<{
   // ── 红包 ────────────────────────────────────────
   if (data.type === 'redpacket') {
     return (
-      <div style={{ padding: 32, backgroundColor: '#EDEDED' }}>
-        <div style={rowStyle(isSelf)}>
-          <Avatar name={data.name} avatarId={data.avatarId} />
+      <div style={containerStyle(isSelf)}>
+        <Avatar name={data.name} avatarId={data.avatarId} />
+        <div style={{ maxWidth: Math.round(WX_SIZE.payCardWidth * 1.1), flex: '0 0 auto', minWidth: 0 }}>
           <PayCard payType="redpacket" role={data.role || 'left'} />
         </div>
       </div>
@@ -237,9 +206,9 @@ export const ChatBubble: React.FC<{
   // ── 转账 ────────────────────────────────────────
   if (data.type === 'transfer') {
     return (
-      <div style={{ padding: 32, backgroundColor: '#EDEDED' }}>
-        <div style={rowStyle(isSelf)}>
-          <Avatar name={data.name} avatarId={data.avatarId} />
+      <div style={containerStyle(isSelf)}>
+        <Avatar name={data.name} avatarId={data.avatarId} />
+        <div style={{ maxWidth: Math.round(WX_SIZE.payCardWidth * 1.1), flex: '0 0 auto', minWidth: 0 }}>
           <PayCard payType="transfer" role={data.role || 'left'} />
         </div>
       </div>
@@ -248,38 +217,36 @@ export const ChatBubble: React.FC<{
 
   // ── 文字（默认） ────────────────────────────────
   return (
-    <div style={{ padding: 32, backgroundColor: '#EDEDED' }}>
-      <div style={rowStyle(isSelf)}>
-        <Avatar name={data.name} avatarId={data.avatarId} />
-        <div
+    <div style={containerStyle(isSelf)}>
+      <Avatar name={data.name} avatarId={data.avatarId} />
+      <div
+        style={{
+          position: 'relative',
+          minWidth: WX_SIZE.bubbleMinWidth,
+          maxWidth: WX_SIZE.bubbleMaxWidth,
+          padding: `${WX_SIZE.bubblePadV}px ${WX_SIZE.bubblePadH}px`,
+          borderRadius: WX_SIZE.bubbleRadius,
+          background: bubbleColor,
+          boxShadow: WX_COLOR.bubbleShadow,
+          display: 'inline-flex',
+          flex: '0 1 auto',
+        }}
+      >
+        <BubbleTail side={isSelf ? 'right' : 'left'} color={bubbleColor} />
+        <span
           style={{
-            position: 'relative',
-            minWidth: WX_SIZE.bubbleMinWidth,
-            padding: `${WX_SIZE.bubblePadV}px ${WX_SIZE.bubblePadH}px`,
-            borderRadius: WX_SIZE.bubbleRadius,
-            background: bubbleColor,
-            boxShadow: WX_COLOR.bubbleShadow,
-            display: 'inline-flex',
-            flex: '0 1 auto',
+            fontSize: WX_SIZE.bodySize,
+            color: WX_COLOR.textBody,
+            lineHeight: WX_LINE_HEIGHT,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            maxWidth: '22em',
+            display: 'inline-block',
           }}
         >
-          <BubbleTail side={isSelf ? 'right' : 'left'} color={bubbleColor} />
-          <span
-            style={{
-              fontSize: WX_SIZE.bodySize,
-              color: WX_COLOR.textBody,
-              lineHeight: WX_LINE_HEIGHT,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              maxWidth: '14em',
-              display: 'inline-block',
-            }}
-          >
-            {data.text}
-          </span>
-        </div>
+          {data.text}
+        </span>
       </div>
     </div>
   );
 };
-

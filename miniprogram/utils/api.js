@@ -10,7 +10,12 @@ function callFunction(name, data = {}) {
       data,
       success: (res) => {
         if (res.result && res.result.success === false) {
-          reject(new Error(res.result.message || `${name} 调用失败`));
+          // 保留业务错误码与附加数据，供上层区分「额度超限」这类可预期失败，
+          // 走专门的友好提示而不是通用报错弹窗
+          const err = new Error(res.result.message || `${name} 调用失败`);
+          err.code = res.result.code || '';
+          err.payload = res.result.data;
+          reject(err);
           return;
         }
         resolve(res.result && res.result.data !== undefined ? res.result.data : res.result);
@@ -40,9 +45,22 @@ function regenerateDialogue(taskId) {
   return callFunction('generateDialogue', { taskId, regenerate: true });
 }
 
-/** 确认对话内容，进入后续生成流程 */
+/**
+ * 确认对话内容，进入后续生成流程。
+ *
+ * 完成通知的订阅不在这里挂：主流程上插一层授权弹层会让用户以为操作被阻断。
+ * 改由进度页在进入 2 秒后自动邀请，并通过 setTaskNotify 单独写入凭证。
+ */
 function confirmDialogue(taskId, dialogue) {
   return callFunction('confirmDialogue', { taskId, dialogue });
+}
+
+/**
+ * 为进行中的任务开启完成通知（进度页的邀请弹层与通知卡片都走这里）。
+ * 一次性订阅：用户每授权一次，服务端换来一次下发额度。
+ */
+function setTaskNotify(taskId, templateId) {
+  return callFunction('setTaskNotify', { taskId, templateId });
 }
 
 /** 首次触发歌词生成（客户端直接调用，避免云函数间调用链路的耗时限制） */
@@ -85,6 +103,11 @@ function updateUserProfile({ nickName, avatarUrl }) {
   return callFunction('updateUserProfile', { nickName, avatarUrl });
 }
 
+/** 查询今日 MV 生成额度（剩余次数），用于首页/创建页展示与前置拦截 */
+function getDailyQuota() {
+  return callFunction('getDailyQuota', {});
+}
+
 module.exports = {
   callFunction,
   createTask,
@@ -92,6 +115,7 @@ module.exports = {
   startDialogue,
   regenerateDialogue,
   confirmDialogue,
+  setTaskNotify,
   startLyrics,
   startMusic,
   startFetchLyricsTimestamps,
@@ -100,4 +124,5 @@ module.exports = {
   deleteWork,
   getUserProfile,
   updateUserProfile,
+  getDailyQuota,
 };

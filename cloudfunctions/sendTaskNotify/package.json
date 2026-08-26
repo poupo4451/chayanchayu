@@ -1,0 +1,9 @@
+{
+  "name": "sendTaskNotify",
+  "version": "1.0.0",
+  "description": "任务终态后下发生成完成的订阅消息通知",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

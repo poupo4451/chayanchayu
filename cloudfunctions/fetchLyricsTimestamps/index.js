@@ -132,6 +132,7 @@ async function fetchTimestamps({ providerTaskId, audioId }) {
       `Suno时间戳获取失败: ${(json && json.msg) || `HTTP ${statusCode}`}`
     );
   }
+  console.log('RAW_SUNO_ALIGNED_WORDS', JSON.stringify(json.data));
   return {
     timeline: aggregateLines(json.data.alignedWords),
     words: simplifyWords(json.data.alignedWords),
@@ -144,6 +145,7 @@ exports.main = async (event) => {
     return { success: false, message: '缺少 taskId 参数' };
   }
 
+  const openid = cloud.getWXContext().OPENID || '';
   const tasksCol = db.collection('tasks');
   let lyricsTimeline = [];
   let lyricsWords = [];
@@ -151,6 +153,22 @@ exports.main = async (event) => {
   try {
     const taskRes = await tasksCol.doc(taskId).get();
     const task = taskRes.data;
+
+    if (!task) {
+      return { success: false, message: '任务不存在' };
+    }
+
+    // ── 客户端调用的前置校验（服务端定时器 pollMusicStatus 无 OPENID，直接放行）──
+    // 本函数会把任务推进到 rendering_video，从而触发付费的云托管渲染，
+    // 因此同样要求调用者是任务所有者且任务已合法扣过每日额度。
+    if (openid) {
+      if (task.userId !== openid) {
+        return { success: false, code: 'FORBIDDEN', message: '无权操作此任务' };
+      }
+      if (!task.quotaDateKey) {
+        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起生成' };
+      }
+    }
 
     try {
       const tsResult = await fetchTimestamps({

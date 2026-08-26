@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "openapi": []
+  },
+  "envVariables": {
+    "TENCENTCLOUD_SECRETID": "",
+    "TENCENTCLOUD_SECRETKEY": ""
+  },
+  "triggers": []
+}

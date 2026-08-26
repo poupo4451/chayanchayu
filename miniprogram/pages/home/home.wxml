@@ -1,19 +1,82 @@
-<view class="page" style="padding-top: {{safeTop}}px;">
-  <view class="hero card">
-    <text class="page-title">言语生声</text>
-    <text class="page-desc">输入一个主题，AI帮你编一段"很绿茶"的聊天，再变成一首歌</text>
+<view class="page home-page" style="padding-top: {{safeTop}}px;">
+  <!-- 标题区：左对齐极简，无卡片 -->
+  <view class="hero">
+    <text class="hero-title">言语生声</text>
+    <text class="hero-sub">把一段对话，做成会唱的歌词动画</text>
   </view>
 
-  <view class="section-title">🔥 热门案例</view>
-  <scroll-view scroll-x class="case-scroll">
-    <view class="case-card" wx:for="{{cases}}" wx:key="id">
-      <view class="case-cover"></view>
-      <text class="case-title">{{item.title}}</text>
-      <text class="case-duration">{{item.duration}}</text>
-    </view>
-  </scroll-view>
+  <!-- 案例：16:9 大预览，横版已完整展示无需全屏，点击仅切换声音 -->
+  <view class="demo-card" bindtap="onToggleMute">
+    <video
+      wx:if="{{!demoError}}"
+      id="demoVideo"
+      class="demo-video"
+      src="{{demoUrl}}"
+      poster="{{demoPoster}}"
+      object-fit="cover"
+      autoplay
+      loop
+      muted="{{muted}}"
+      controls="{{false}}"
+      show-fullscreen-btn="{{false}}"
+      show-center-play-btn="{{false}}"
+      show-play-btn="{{false}}"
+      show-mute-btn="{{false}}"
+      show-progress="{{false}}"
+      show-casting-button="{{false}}"
+      enable-progress-gesture="{{false}}"
+      enable-play-gesture="{{false}}"
+      vslide-gesture="{{false}}"
+      vslide-gesture-in-fullscreen="{{false}}"
+      binderror="onDemoError"
+    ></video>
 
-  <view class="fab-create" bindtap="goCreate">
-    <text>+ 开始创作</text>
+    <!-- 视频不可用时的兜底占位，避免只剩一块黑 -->
+    <view class="demo-fallback" wx:else catchtap="onRetryDemo">
+      <text class="demo-fallback-title">案例预览</text>
+      <text class="demo-fallback-text">视频加载失败，点击重试</text>
+    </view>
+
+    <!-- 左上角案例角标 -->
+    <view class="demo-tag" wx:if="{{!demoError}}">
+      <text class="demo-tag-text">案例</text>
+    </view>
+
+    <!-- 右下角声音状态提示：纯展示，点击由整张卡片接管 -->
+    <view class="demo-sound" wx:if="{{!demoError}}">
+      <view class="demo-sound-icon">
+        <view class="demo-wave demo-wave-1 {{muted ? '' : 'demo-wave-on'}}"></view>
+        <view class="demo-wave demo-wave-2 {{muted ? '' : 'demo-wave-on'}}"></view>
+        <view class="demo-wave demo-wave-3 {{muted ? '' : 'demo-wave-on'}}"></view>
+      </view>
+      <text class="demo-sound-text">{{muted ? '点击听声音' : '点击静音'}}</text>
+    </view>
+  </view>
+
+  <!-- 创作入口大卡片 -->
+  <view
+    class="create-card"
+    bindtap="goCreate"
+    hover-class="create-card-hover"
+    hover-stay-time="80"
+  >
+    <view class="create-glow"></view>
+
+    <!-- 右上角额度角标：与案例卡片的「案例」角标同一套视觉语言，纯展示不拦截点击 -->
+    <view
+      class="create-quota {{quotaExhausted ? 'create-quota-off' : ''}}"
+      wx:if="{{quotaLoaded}}"
+    >
+      <text class="create-quota-text">{{quotaText}}</text>
+    </view>
+
+    <image class="create-icon" src="/images/create-voice-icon.svg" mode="aspectFit" />
+    <text class="create-title">创作对话歌词动画</text>
+    <text class="create-sub">输入一个主题，自动生成对话与配乐</text>
+  </view>
+
+  <!-- 占位卡片：仅作预告，不可点击（无 bindtap，且 pointer-events 关闭） -->
+  <view class="soon-card">
+    <text class="soon-text">更多歌词动画类型开发中</text>
   </view>
 </view>

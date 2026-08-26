@@ -2,41 +2,38 @@ Component({
   data: {
     selected: 0,
     list: [
-      { pagePath: '/pages/home/home', text: '首页', icon: '🏠' },
-      { pagePath: '/pages/my-works/my-works', text: '我的作品', icon: '🎬' },
+      {
+        pagePath: '/pages/home/home',
+        text: '首页',
+        icon: '/images/tab-home.svg',
+        activeIcon: '/images/tab-home-active.svg',
+      },
+      {
+        pagePath: '/pages/my-works/my-works',
+        text: '我的作品',
+        icon: '/images/tab-works.svg',
+        activeIcon: '/images/tab-works-active.svg',
+      },
     ],
   },
 
-  lifetimes: {
-    attached() {
-      this.updateSelected();
-    },
-  },
-
-  pageLifetimes: {
-    show() {
-      // 延迟确保 getCurrentPages() 返回已切换后的页面
-      setTimeout(() => this.updateSelected(), 50);
-    },
-  },
-
   methods: {
-    updateSelected() {
-      const pages = getCurrentPages();
-      const page = pages[pages.length - 1];
-      if (!page) return;
-      const route = '/' + page.route;
-      const index = this.data.list.findIndex((item) => item.pagePath === route);
-      // 防止页面过渡期被旧 route 覆盖掉 switchTab 已设的选中态
-      if (index !== -1 && this.data.selected !== index) {
+    /**
+     * 由各 tab 页在 onShow 中显式调用，传入自身索引。
+     * 自定义 tab-bar 在每个 tab 页都是独立实例，
+     * 不能在点击时给「即将离开的页面」写状态（会残留脏值导致下次进入不刷新），
+     * 也不能依赖 getCurrentPages() + setTimeout 猜时机（存在竞态）。
+     */
+    setSelected(index) {
+      if (index !== this.data.selected) {
         this.setData({ selected: index });
       }
     },
 
     switchTab(e) {
-      const { path } = e.currentTarget.dataset;
-      const index = this.data.list.findIndex((item) => item.pagePath === path);
-      if (index !== -1) this.setData({ selected: index });
+      const { path, index } = e.currentTarget.dataset;
+      // 点击当前页不重复跳转，避免 switchTab 无谓开销
+      if (Number(index) === this.data.selected) return;
       wx.switchTab({ url: path });
     },
   },

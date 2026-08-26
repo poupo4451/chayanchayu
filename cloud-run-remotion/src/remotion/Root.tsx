@@ -20,6 +20,9 @@ export const Root: React.FC = () => {
         bubbles: [] as BubbleData[],
         audioPath: '',
         audioDuration: 30,
+        audioTrimBefore: 0,
+        audioFadeInFrames: 0,
+        audioFadeOutFrames: 0,
         beats: [] as number[],
         genre: '',
       }}

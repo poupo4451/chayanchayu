@@ -1,12 +1,11 @@
 import React from 'react';
 import { AbsoluteFill, Audio, useCurrentFrame, useVideoConfig } from 'remotion';
 import { ChatBubble, BubbleData } from './ChatBubble';
-import { CANVAS_HEIGHT, FONT_FAMILY, WX_COLOR, WX_SIZE } from './wxTheme';
+import { CANVAS_HEIGHT, FONT_FAMILY, WX_COLOR, CONTAINER_WIDTH } from './wxTheme';
 import {
   beatEnergy,
   enterMotion,
   pickVariantForGenre,
-  pickHeroVariant,
   comboEnterMotion,
   pickHeroCombo,
   exitMotionVariant,
@@ -14,8 +13,16 @@ import {
   pickHeroExitVariant,
   dynamicEnterFrames,
   dynamicExitFrames,
+  stageIdleMotion,
+  reAccentMotion,
+  type EnterVariant,
+  type MotionState,
 } from './gsapMotion';
 import { CANVAS_WIDTH, GROUP_SCALE_RANGE } from './animation-config';
+
+/** 安全区：两侧各预留 1% 留白，内容在 98% 画布宽度内缩放显示 */
+const SAFE_AREA_RATIO = 0.98;
+const SAFE_WIDTH = CANVAS_WIDTH * SAFE_AREA_RATIO;
 
 interface ChatMVProps {
   bubbles: BubbleData[];
@@ -25,6 +32,12 @@ interface ChatMVProps {
   beats?: number[];
   /** 音乐流派，用于挑选气泡入场动画池（嘻哈更 punchy，抒情类更柔和） */
   genre?: string;
+  /** 音频左侧裁剪帧数（裁掉前奏），与气泡帧号偏移量一致 */
+  audioTrimBefore?: number;
+  /** 开头淡入帧数，0 表示不淡入（仅在裁了前奏时启用） */
+  audioFadeInFrames?: number;
+  /** 结尾淡出帧数，0 表示不淡出 */
+  audioFadeOutFrames?: number;
 }
 
 /**
@@ -45,21 +58,49 @@ interface ChatMVProps {
  * 气泡入场幅度也会跟着当拍能量放大，鼓点越密动作越有劲。
  */
 
-const MAX_PER_GROUP = 4;
-/** 组内首尾最大跨度（秒），超过就分组 */
-const GROUP_MAX_SPAN_S = 8;
+const GROUP_MAX_SPAN_S = 5;
 /** 组内相邻两条最大间隔（秒），超过就分组 */
-const GROUP_MAX_GAP_S = 3.5;
+const GROUP_MAX_GAP_S = 1.8;
 /** Hero 独占时刻最低占比，低于此值触发节奏兜底强制抽条 */
 const HERO_MIN_RATIO = 0.15;
+/**
+ * Hero 占比上限。
+ * uniform 降级（拿不到 Suno 时间戳）时气泡按 totalFrames/n 均分，间隔常常
+ * 大于 GROUP_MAX_GAP_S，于是每条气泡各自成组 → cur.length === 1 → 全片都是
+ * Hero 独占，每个 Hero 入场几帧后冻结数秒。这是「视频播一半就没动画」的
+ * 主要来源之一，必须反向合并回对话组。
+ */
+const HERO_MAX_RATIO = 0.35;
+/** Hero 合并回对话组时，单组最多容纳多少条 */
+const MAX_MERGE_ITEMS = 3;
 /** 节奏兜底：每多少个非 Hero 组强制把末条抽成独立 Hero */
-const FORCE_HERO_EVERY = 5;
+const FORCE_HERO_EVERY = 3;
 /**
  * 尾帧安全边距（秒）：最后一组气泡的结束帧延长这么多，
  * 防止音频实际时长超过 Suno 上报值时动画被切断。
  * 这个延长仅在 Remotion 合成内部生效，不会拖长最终视频（视频时长由 composition 决定）。
  */
 const TAIL_MARGIN_S = 2.0;
+/** 触发并行波次的密集阈值（秒）：相邻歌词间隔小于此值，允许同波次出场 */
+const WAVE_DENSE_GAP_S = 0.42;
+/** 单个波次允许覆盖的最大歌词跨度（秒），避免未来内容提前太多 */
+const WAVE_MAX_SPAN_S = 0.55;
+/** 单波次最多同时编排多少条容器 */
+const WAVE_MAX_ITEMS = 4;
+/** 同波次内部的轻微错峰（秒），既像同时出现又不至于机械整齐 */
+const WAVE_MICRO_STAGGER_S = 0.025;
+/** 密集波次入场最短/最长时长（秒）- 短促有力，爆炸感 */
+const WAVE_ENTER_MIN_S = 0.15;
+const WAVE_ENTER_MAX_S = 0.30;
+/** 宽松单条入场最短/最长时长（秒）- 舒展呼吸，叙事感 */
+const SINGLE_ENTER_MIN_S = 0.24;
+const SINGLE_ENTER_MAX_S = 0.55;
+/** 密集波次能量增强系数：让每个变体的位移/旋转更夸张 */
+const DENSE_WAVE_ENERGY_BOOST = 1.4;
+/** 单条气泡允许的最大绝对提前量（秒），超过此值强制按歌词时间出场 */
+const MAX_INDIVIDUAL_ADVANCE_S = 0.12;
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 /** 基于组索引生成伪随机但确定性的场景缩放（取 animation-config GROUP_SCALE_RANGE 区间） */
 function computeSceneScale(index: number): number {
@@ -77,6 +118,155 @@ interface Group {
   hero: boolean;
   /** 本组场景缩放系数，不同组取不同值产生推拉镜头感 */
   sceneScale: number;
+}
+
+interface Wave {
+  items: BubbleData[];
+  /** 波次锚点 = 波内第一条气泡的 startFrame */
+  start: number;
+  /** 下一波到来前可用于完成本波动画的预算 */
+  end: number;
+}
+
+const DENSE_WAVE_COMBO_BLOCKLIST = new Set<EnterVariant>(['typewriter']);
+
+function getWaveSpanFrames(wave: Wave): number {
+  if (wave.items.length <= 1) return 0;
+  const first = wave.items[0].startFrame ?? wave.start;
+  const last = wave.items[wave.items.length - 1].startFrame ?? wave.start;
+  return Math.max(0, last - first);
+}
+
+function buildWaves(items: BubbleData[], groupStart: number, groupEnd: number, fps: number): Wave[] {
+  if (items.length === 0) return [];
+
+  const denseGapFrames = Math.max(6, Math.round(WAVE_DENSE_GAP_S * fps));
+  const maxSpanFrames = Math.max(denseGapFrames + 2, Math.round(WAVE_MAX_SPAN_S * fps));
+  const waves: Wave[] = [];
+  let cur: BubbleData[] = [];
+
+  const flush = () => {
+    if (cur.length === 0) return;
+    waves.push({
+      items: cur,
+      start: cur[0].startFrame ?? groupStart,
+      end: groupEnd,
+    });
+    cur = [];
+  };
+
+  for (const item of items) {
+    if (cur.length === 0) {
+      cur = [item];
+      continue;
+    }
+
+    const first = cur[0].startFrame ?? groupStart;
+    const prev = cur[cur.length - 1].startFrame ?? first;
+    const self = item.startFrame ?? prev;
+    const prevGap = self - prev;
+    const span = self - first;
+    const shouldJoinDenseWave =
+      cur.length < WAVE_MAX_ITEMS && prevGap <= denseGapFrames && span <= maxSpanFrames;
+
+    if (shouldJoinDenseWave) {
+      cur.push(item);
+    } else {
+      flush();
+      cur = [item];
+    }
+  }
+  flush();
+
+  for (let i = 0; i < waves.length; i += 1) {
+    waves[i].end = i + 1 < waves.length ? waves[i + 1].start : groupEnd;
+  }
+
+  return waves;
+}
+
+function getWaveMicroStaggerFrames(wave: Wave, fps: number): number {
+  if (wave.items.length <= 1) return 0;
+  return Math.max(1, Math.round(WAVE_MICRO_STAGGER_S * fps));
+}
+
+function getWaveEnterFrames(wave: Wave, fps: number): number {
+  const baseBudget = Math.max(wave.end - wave.start, Math.round(SINGLE_ENTER_MIN_S * fps));
+  const baseFrames = dynamicEnterFrames(baseBudget);
+
+  if (wave.items.length <= 1) {
+    // 宽松模式：单条气泡有充分时间舒展，上限拉到 0.88s
+    return clamp(
+      baseFrames,
+      Math.round(SINGLE_ENTER_MIN_S * fps),
+      Math.round(SINGLE_ENTER_MAX_S * fps),
+    );
+  }
+
+  // 炸裂模式：多气泡同波次，短促有力
+  const minFrames = Math.round(WAVE_ENTER_MIN_S * fps);
+  const maxFrames = Math.round(WAVE_ENTER_MAX_S * fps);
+  const spanBonus = Math.min(Math.round(getWaveSpanFrames(wave) * 0.25), Math.round(fps * 0.08));
+  const sizeBonus = Math.round((wave.items.length - 1) * Math.max(1, fps * 0.02));
+
+  return clamp(baseFrames + spanBonus + sizeBonus, minFrames, maxFrames);
+}
+
+function pickWaveEnterVariants(seed: number, genre: string | undefined, waveSize: number): EnterVariant[] {
+  const primary = pickVariantForGenre(seed, genre);
+  if (waveSize <= 1) return [primary];
+
+  // 炸裂模式：3 条及以上追求 3 变体叠加，2 条追求 2 变体
+  const targetCount = waveSize >= 3 ? 3 : 2;
+  const variants: EnterVariant[] = [];
+
+  if (!DENSE_WAVE_COMBO_BLOCKLIST.has(primary)) {
+    variants.push(primary);
+  }
+
+  for (let offset = 5; offset <= 45 && variants.length < targetCount; offset += 5) {
+    const next = pickVariantForGenre(seed + offset, genre);
+    if (!DENSE_WAVE_COMBO_BLOCKLIST.has(next) && !variants.includes(next)) {
+      variants.push(next);
+    }
+  }
+
+  if (variants.length === 0) {
+    variants.push('slide');
+  }
+
+  return variants;
+}
+
+function composeWaveEnterMotion(
+  variants: EnterVariant[],
+  raw: number,
+  side: 'left' | 'right',
+  energy: number,
+): MotionState {
+  if (variants.length <= 1) {
+    return enterMotion(variants[0], raw, side, energy);
+  }
+
+  let opacity = 1;
+  const transforms: string[] = [];
+  const filters: string[] = [];
+  let transformOrigin: string | undefined;
+
+  for (const variant of variants) {
+    const motion = enterMotion(variant, raw, side, energy);
+    opacity *= motion.opacity;
+    if (motion.transform && motion.transform !== 'none') transforms.push(motion.transform);
+    if (motion.filter) filters.push(motion.filter);
+    if (!transformOrigin && motion.transformOrigin) transformOrigin = motion.transformOrigin;
+  }
+
+  return {
+    opacity,
+    transform: transforms.join(' ') || 'none',
+    filter: filters.join(' ') || undefined,
+    transformOrigin,
+  };
 }
 
 /**
@@ -118,10 +308,7 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
     const first = cur[0].startFrame ?? 0;
     const prev = cur[cur.length - 1].startFrame ?? 0;
     const self = b.startFrame ?? 0;
-    const full = cur.length >= MAX_PER_GROUP;
-    const tooLong = self - first > maxSpan;
-    const tooFar = self - prev > maxGap;
-    if (full || tooLong || tooFar) {
+    if (self - first > maxSpan || self - prev > maxGap) {
       flush();
       cur = [b];
     } else {
@@ -129,6 +316,25 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
     }
   }
   flush();
+
+  // 反向兜底：Hero 占比过高（典型场景是 uniform 降级导致每条气泡各自成组）时，
+  // 把相邻的 Hero 合并回多气泡对话组。全片 Hero 会让每个镜头都是
+  // 「入场几帧 + 冻结数秒」，观感就是没有动画。
+  const heroRatioNow = groups.filter((g) => g.hero).length / Math.max(groups.length, 1);
+  if (heroRatioNow > HERO_MAX_RATIO && groups.length > 1) {
+    const merged: Group[] = [];
+    for (const g of groups) {
+      const prev = merged[merged.length - 1];
+      if (g.hero && prev && prev.hero && prev.items.length < MAX_MERGE_ITEMS) {
+        prev.items.push(...g.items);
+        prev.hero = false;
+      } else {
+        merged.push({ ...g, items: [...g.items] });
+      }
+    }
+    groups.length = 0;
+    groups.push(...merged);
+  }
 
   // 节奏兜底：Hero 占比过低时，每 FORCE_HERO_EVERY 个非 Hero 组强制抽末条为独立 Hero
   const heroCount = groups.filter((g) => g.hero).length;
@@ -186,137 +392,224 @@ const BubbleGroup: React.FC<{
 }> = ({ group, groupIndex, frame, fps, beats, genre }) => {
   // 动态退场时长：组停留越久退场动作越舒展，密集时更利落
   const groupSpan = Math.max(group.end - group.start, 1);
-  const exitFrames = dynamicExitFrames(Math.min(groupSpan, fps * 1.4));
+  const exitFrames = dynamicExitFrames(Math.min(groupSpan, fps * 0.88));
   const exitStart = group.end - exitFrames;
-  const exitRaw = frame > exitStart ? (frame - exitStart) / exitFrames : 0;
+  /**
+   * 退场起点的硬上限。
+   * 退场必须在组被摘掉（frame >= group.end）之前完整播完，
+   * 所以起点最晚只能是 group.end - exitFrames。缺了这道钳制，
+   * endFrame 一旦顶到组边界，退场进度就恒为 0，动画一帧都不播。
+   */
+  const latestExitStart = Math.max(group.start, group.end - exitFrames);
+  const waves = group.hero ? [] : buildWaves(group.items, group.start, group.end, fps);
+
+  // 常驻律动：入场播完到退场开始之间，靠这一层保证画面不静止。
+  // 传入本组预计停留时长，停得越久律动越明显（兜住 uniform 降级的超长停留）。
+  const holdSeconds = groupSpan / fps;
+  const idle = stageIdleMotion(frame, group.start, groupIndex, beats, fps, holdSeconds);
 
   // ── Hero 独占组：单条气泡炸屏 ──────────────────────────────────────
   if (group.hero) {
     const item = group.items[0];
-    const anticipation = Math.round(fps * 0.5);
+    const enterFrames = dynamicEnterFrames(Math.max(groupSpan, fps * 0.31));
+    // anticipation 不能吃掉超过一半入场进度，否则气泡直接以终态出现（零动画）
+    const anticipation = Math.min(Math.round(fps * 0.19), Math.floor(enterFrames / 2));
     const start = (item.startFrame ?? group.start) - anticipation;
     const local = frame - start;
 
-    const enterFrames = dynamicEnterFrames(Math.max(groupSpan, fps * 0.5));
     const raw = Math.min(Math.max(local, 0) / enterFrames, 1);
-    const energy = beatEnergy(start, beats, fps, 4);
-    const seed = item.index * 7 + (item.subIndex || 0);
     const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
     // Hero 高潮时刻：2-3 个入场动画组合叠加，炸屏更猛
     const heroCombo = pickHeroCombo(groupIndex);
     const comboMotion = comboEnterMotion(heroCombo, raw, side);
 
-    // Hero 放大倍数：叠加场景缩放系数，让每个 Hero 组也有不同的推拉感
-    const effectiveHeroScale = 1.18 * group.sceneScale;
+    // Hero 放大倍数：叠加场景缩放 + 安全区自适配缩放 + 常驻律动呼吸
+    const fitScale = Math.min(1, SAFE_WIDTH / CONTAINER_WIDTH);
+    const effectiveScale = 1.18 * group.sceneScale * fitScale * idle.scale;
     const heroExitVariant = pickHeroExitVariant(groupIndex);
-    // 确保气泡不在歌词唱完前退场：以气泡 endFrame 为退场下限
+    // 退场窗口：不早于歌词唱完（endFrame），也不晚于 latestExitStart
     const heroBubbleEnd = item.endFrame ?? group.end;
-    const heroExitStart = Math.max(group.end - exitFrames, heroBubbleEnd);
-    const heroExitRaw = frame > heroExitStart ? (frame - heroExitStart) / exitFrames : 0;
+    const heroExitStart = Math.min(Math.max(heroBubbleEnd, exitStart), latestExitStart);
+    const heroExitRaw = frame > heroExitStart
+      ? clamp((frame - heroExitStart) / exitFrames, 0, 1)
+      : 0;
     const exit = exitMotionVariant(heroExitVariant, heroExitRaw, side, CANVAS_WIDTH, CANVAS_HEIGHT, true);
+
+    // Hero 长驻时的二次脉冲：入场结束后随鼓点继续 pop
+    const heroAccent = reAccentMotion(frame, item.startFrame ?? group.start, beats, fps, groupIndex);
 
     const combinedOpacity = comboMotion.opacity * exit.opacity;
     const motionTransform = comboMotion.transform || '';
-    const combinedTransform = `${motionTransform} scale(${effectiveHeroScale.toFixed(4)}) ${exit.transform}`;
+    const combinedTransform =
+      `translate3d(${idle.x.toFixed(2)}px,${idle.y.toFixed(2)}px,0) ` +
+      `${motionTransform} ` +
+      `scale(${(effectiveScale * heroAccent.scale).toFixed(4)}) ` +
+      `rotate(${heroAccent.rotate.toFixed(2)}deg) ` +
+      `${exit.transform}`;
     const combinedFilter = [comboMotion.filter, exit.filter].filter(Boolean).join(' ') || undefined;
 
     return (
-      <AbsoluteFill>
-        <AbsoluteFill
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'center',
-            padding: '0 140px',
-            opacity: combinedOpacity,
-            transform: combinedTransform,
-            transformOrigin: 'center center',
-            filter: combinedFilter,
-            willChange: 'transform, opacity, filter',
-          }}
-        >
-          {/* Hero 模式气泡整体会被再放大 ~1.18 倍，提前把气泡最大宽度收窄到 65%，
-              为放大动画预留安全边距，避免贴着 1080px 画布边缘的气泡被推出屏幕 */}
-          <ChatBubble data={item} maxWidthScale={0.65} />
-        </AbsoluteFill>
+      <AbsoluteFill
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          opacity: combinedOpacity,
+          transform: combinedTransform,
+          transformOrigin: 'center center',
+          filter: combinedFilter,
+          willChange: 'transform, opacity, filter',
+        }}
+      >
+        <ChatBubble data={item} />
       </AbsoluteFill>
     );
   }
 
-  // ── 普通组：多条同屏对话 + 场景缩放，每条气泡独立入场/退场变体 ────────────────────
+  // ── 普通组：宽松段单条出场，密集段自动切成同波次并行出场 ────────────
+  const fitScale = Math.min(1, SAFE_WIDTH / CONTAINER_WIDTH);
+  const baseAnticipation = Math.round(fps * 0.19);
+  const maxAdvanceFrames = Math.round(MAX_INDIVIDUAL_ADVANCE_S * fps);
+  const lastItem = group.items[group.items.length - 1];
+
   return (
     <AbsoluteFill
       style={{
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
-        transform: `scale(${group.sceneScale.toFixed(4)})`,
+        alignItems: 'center',
+        // 常驻律动叠加在整组舞台上：慢漂 + 呼吸缩放，长镜头也不会是静帧
+        transform:
+          `translate3d(${idle.x.toFixed(2)}px,${idle.y.toFixed(2)}px,0) ` +
+          `scale(${(group.sceneScale * fitScale * idle.scale).toFixed(4)})`,
         transformOrigin: 'center center',
-        willChange: 'transform, opacity, filter',
+        willChange: 'transform',
       }}
     >
-      {group.items.map((item, idx) => {
-        const anticipation = Math.round(fps * 0.5);
-        const start = (item.startFrame ?? group.start) - anticipation;
-        const local = frame - start;
+      {waves.map((wave, waveIndex) => {
+        const isDense = wave.items.length > 1;
+        const waveEnterFrames = getWaveEnterFrames(wave, fps);
+        const microStaggerFrames = getWaveMicroStaggerFrames(wave, fps);
+        const waveSeed = groupIndex * 17 + waveIndex * 11;
+        const sharedWaveVariants = pickWaveEnterVariants(waveSeed, genre, wave.items.length);
+        // 密集波次提前量略减，优先歌词对齐；宽松单条可提前更多留呼吸。
+        // 但绝不能超过入场时长的一半 —— 否则第 0 帧 enterRaw 就已经是 1，
+        // 气泡直接以终态出现，开头整段没有动画。
+        const rawAnticipation = isDense ? Math.round(fps * 0.11) : baseAnticipation;
+        const waveAnticipation = Math.min(rawAnticipation, Math.floor(waveEnterFrames / 2));
 
-        // 未到时间：保留布局占位，只是不可见 —— 保证组内构图稳定
-        if (local < 0) {
+        return wave.items.map((item, idx) => {
+          const isLast = item === lastItem;
+          const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
+          const seed = item.index * 7 + (item.subIndex || 0);
+
+          // 歌词对齐硬约束：每条气泡不能提前超过 MAX_INDIVIDUAL_ADVANCE_S
+          const idealStart = wave.start - waveAnticipation + idx * microStaggerFrames;
+          const hardFloor = (item.startFrame ?? wave.start) - maxAdvanceFrames;
+          const itemStart = Math.max(idealStart, hardFloor);
+
+          const enterLocal = frame - itemStart;
+          const enterRaw = clamp(enterLocal / waveEnterFrames, 0, 1);
+          const entered = enterLocal >= 0;
+
+          // 多气泡同波次时共享一套主动画节奏，但每条轮换不同组合顺序，避免完全同动作复制
+          const perItemVariants = !isDense
+            ? [pickVariantForGenre(seed, genre)]
+            : sharedWaveVariants
+                .map((_, offset) => sharedWaveVariants[(idx + offset) % sharedWaveVariants.length])
+                .slice(0, Math.min(sharedWaveVariants.length, wave.items.length >= 3 ? 3 : 2));
+
+          // 能量增强：密集波次每个变体的位移/旋转更夸张。
+          // 用当前帧求值（而非固定 startFrame），入场过程中幅度随鼓点实时变化。
+          const baseEnergy = beatEnergy(frame, beats, fps, 4);
+          const energy = isDense ? baseEnergy * DENSE_WAVE_ENERGY_BOOST : baseEnergy;
+          const motion = composeWaveEnterMotion(perItemVariants, enterRaw, side, energy);
+
+          // 退出逐条独立，保证歌词结束点和离场姿态都更丰富。
+          // 起点夹在 [歌词唱完, latestExitStart] 之间：不能早于唱完，
+          // 也不能晚到来不及在组消失前播完。
+          const bubbleEnd = item.endFrame ?? group.end;
+          const bubbleExitStart = Math.min(Math.max(bubbleEnd, exitStart), latestExitStart);
+          const bubbleExitRaw = frame > bubbleExitStart
+            ? clamp((frame - bubbleExitStart) / exitFrames, 0, 1)
+            : 0;
+          const exitVariant = pickExitVariant(item.index * 3 + waveIndex * 5 + (item.subIndex || 0));
+          const exitMotion = exitMotionVariant(exitVariant, bubbleExitRaw, side, CANVAS_WIDTH, CANVAS_HEIGHT, false);
+
+          // 长驻气泡的二次脉冲：停留够久后随鼓点自己 pop，救活长镜头
+          const accent = reAccentMotion(frame, itemStart, beats, fps, seed);
+
+          if (!entered) {
+            return (
+              <div key={item.uid ?? item.index} style={{ opacity: 0, visibility: 'hidden', marginBottom: isLast ? 0 : -40 }}>
+                <ChatBubble data={item} />
+              </div>
+            );
+          }
+
+          const combinedOpacity = motion.opacity * exitMotion.opacity;
+          // 二次脉冲放在最前面（外层），不干扰入场/退场各自的 transformOrigin 语义
+          const accentTransform =
+            accent.scale !== 1 || accent.rotate !== 0
+              ? `scale(${accent.scale.toFixed(4)}) rotate(${accent.rotate.toFixed(2)}deg)`
+              : null;
+          const combinedTransform = [accentTransform, motion.transform, exitMotion.transform]
+            .filter((t): t is string => typeof t === 'string' && t !== 'none')
+            .join(' ') || undefined;
+          const combinedFilter = [motion.filter, exitMotion.filter]
+            .filter((f): f is string => typeof f === 'string' && f.length > 0)
+            .join(' ') || undefined;
+
           return (
-            <div key={item.uid ?? item.index} style={{ opacity: 0, visibility: 'hidden', marginTop: -1 }}>
+            <div
+              key={item.uid ?? item.index}
+              style={{
+                opacity: combinedOpacity,
+                transform: combinedTransform,
+                transformOrigin: motion.transformOrigin,
+                filter: combinedFilter,
+                clipPath: motion.clipPath,
+                marginBottom: isLast ? 0 : -40,
+                willChange: 'transform, opacity, filter, clip-path',
+              }}
+            >
               <ChatBubble data={item} />
             </div>
           );
-        }
-
-        // 动态入场时长：按到下一条气泡的原始间隔算，不受 anticipation 影响
-        const originalStart = item.startFrame ?? group.start;
-        const nextStart = idx + 1 < group.items.length
-          ? (group.items[idx + 1].startFrame ?? group.end)
-          : group.end;
-        const enterFrames = dynamicEnterFrames(Math.max(nextStart - originalStart, 4));
-        const raw = Math.min(local / enterFrames, 1);
-
-        const energy = beatEnergy(start, beats, fps, 4);
-        const seed = item.index * 7 + (item.subIndex || 0);
-        const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
-        const motion = enterMotion(pickVariantForGenre(seed, genre), raw, side, energy);
-
-        // 每条气泡独立退场时机：确保不早于本条歌词唱完
-        const bubbleEndFrame = item.endFrame ?? group.end;
-        const perBubbleExitStart = Math.max(group.end - exitFrames, bubbleEndFrame);
-        const perBubbleExitRaw = frame > perBubbleExitStart ? (frame - perBubbleExitStart) / exitFrames : 0;
-        const perBubbleExitVariant = pickExitVariant(groupIndex + idx * 3);
-        const indivExit = exitMotionVariant(perBubbleExitVariant, perBubbleExitRaw, side, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-        const combinedOpacity = motion.opacity * indivExit.opacity;
-        const combinedTransform = `${motion.transform} ${indivExit.transform}`;
-
-        return (
-          <div
-            key={item.uid ?? item.index}
-            style={{
-              marginTop: -1,
-              opacity: combinedOpacity,
-              transform: combinedTransform,
-              transformOrigin: motion.transformOrigin,
-              filter: motion.filter,
-              clipPath: motion.clipPath,
-              willChange: 'transform, opacity, filter, clip-path',
-            }}
-          >
-            <ChatBubble data={item} />
-          </div>
-        );
+        });
       })}
     </AbsoluteFill>
   );
 };
 
-export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath, beats, genre }) => {
+/** 等功率淡入淡出曲线：t∈[0,1] → 增益[0,1]，听感比线性斜坡均匀得多 */
+const equalPower = (t: number) => Math.sin(Math.max(0, Math.min(1, t)) * Math.PI * 0.5);
+
+export const ChatMVComposition: React.FC<ChatMVProps> = ({
+  bubbles, audioPath, beats, genre,
+  audioTrimBefore = 0,
+  audioFadeInFrames = 0,
+  audioFadeOutFrames = 0,
+}) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
+
+  const audioVolume = React.useCallback(
+    (f: number) => {
+      let v = 1;
+      if (audioFadeInFrames > 0) {
+        v *= equalPower(f / audioFadeInFrames);
+      }
+      if (audioFadeOutFrames > 0) {
+        const last = durationInFrames - 1;
+        v *= equalPower((last - f) / audioFadeOutFrames);
+      }
+      return v;
+    },
+    [audioFadeInFrames, audioFadeOutFrames, durationInFrames],
+  );
 
   const beatFrames = React.useMemo(() => (beats || []).slice().sort((a, b) => a - b), [beats]);
 
@@ -325,7 +618,7 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath, b
     const list = (bubbles || []).filter((b) => b.type !== 'time');
     // 兜底：缺 startFrame 时按序均分，保证一定能播
     let last = 0;
-    return list.map((b, i) => {
+    const mapped = list.map((b, i) => {
       let sf = b.startFrame;
       if (sf == null) {
         sf = Math.round((durationInFrames * i) / Math.max(list.length, 1));
@@ -334,7 +627,13 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath, b
       last = sf;
       return { ...b, startFrame: sf };
     });
-  }, [bubbles, durationInFrames]);
+
+    // 剔除越界气泡：它们自己永远不会被渲染，但会作为「下一组」把上一个可见组的
+    // group.end 推到视频时长之外，导致那一组的退场永远等不到 → 尾段静止定格。
+    const cutoff = Math.max(durationInFrames - Math.round(fps * 0.2), 1);
+    const visible = mapped.filter((b) => (b.startFrame ?? 0) < cutoff);
+    return visible.length > 0 ? visible : mapped.slice(0, 1);
+  }, [bubbles, durationInFrames, fps]);
 
   const groups = React.useMemo(
     () => buildGroups(items, fps, durationInFrames),
@@ -365,12 +664,18 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath, b
         }}
       />
 
-      {audioPath ? <Audio src={audioPath} /> : null}
+      {audioPath ? (
+        <Audio
+          src={audioPath}
+          {...(audioTrimBefore > 0 ? { trimBefore: audioTrimBefore } : {})}
+          volume={audioFadeInFrames > 0 || audioFadeOutFrames > 0 ? audioVolume : 1}
+        />
+      ) : null}
 
       {/* 舞台：不再使用固定全局缩放，各组按自己的 sceneScale 独立渲染，切换时产生推拉镜头感 */}
       <AbsoluteFill
         style={{
-          padding: '60px 120px',
+          padding: '30px 8px',
         }}
       >
         {rendered.map(({ g, i }) => (
@@ -378,7 +683,7 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({ bubbles, audioPath, b
         ))}
       </AbsoluteFill>
 
-      {/* 安全区留白：保证气泡组不会贴边（1080×1920 竖屏） */}
+      {/* 安全区留白：保证气泡组不会贴边（720×1280 竖屏） */}
       <AbsoluteFill
         style={{
           pointerEvents: 'none',

@@ -61,7 +61,7 @@ export interface AlignReport {
 }
 
 /** 气泡之间至少间隔多少帧，避免多个气泡同帧堆叠 */
-const MIN_GAP_FRAMES = 5;
+export const MIN_GAP_FRAMES = 5;
 /** 模糊匹配判定为「同一行」的相似度阈值 */
 const MATCH_THRESHOLD = 0.55;
 /** 模糊匹配整体可信度阈值，低于此值降级为序号对齐 */
@@ -386,12 +386,196 @@ function subSpanFromChars(stream: TimedChar[], cs: CharSpan, b: BubbleData): Spa
 
 // ── 核心：气泡出现帧 ────────────────────────────────────────────────
 
-function uniformTimings(bubbles: BubbleData[], totalFrames: number): BubbleData[] {
-  const n = Math.max(bubbles.length, 1);
-  const per = Math.max(Math.floor(totalFrames / n), MIN_GAP_FRAMES);
+/**
+ * uniform 降级的编排参数。
+ *
+ * 拿不到时间戳时这条路就是唯一的路，所以它不能只是「能跑」，
+ * 必须自己造出节奏感。核心是两件事：
+ *   1. 分簇：气泡按 1/2/3 条一簇交替，簇内挨着（→ 对话组密集波次），
+ *      簇间拉开（→ 独立分组）。纯等间隔会让每条各自成组 → 全片 Hero。
+ *   2. 留边距：不要从第 0 帧铺到最后一帧，给前奏/尾奏留白。
+ */
+const UNIFORM_LAYOUT = {
+  /** 开头留白：总时长比例，上限 introMaxS 秒 */
+  introRatio: 0.05,
+  introMaxS: 4,
+  /** 结尾留白 */
+  outroRatio: 0.04,
+  outroMaxS: 3,
+  /**
+   * 簇内相邻气泡间隔（秒）的下限与上限。
+   * 必须始终小于 ChatMVComposition 的 GROUP_MAX_GAP_S(1.8s)，否则簇会被拆散。
+   * 气泡稀疏（簇间距很大）时取上限，把入场事件铺开，缓解长停留的静止感。
+   */
+  clusterInnerGapMinS: 0.55,
+  clusterInnerGapMaxS: 1.5,
+  /** 簇内间隔占簇间距的比例，用于在上下限之间插值 */
+  clusterInnerGapRatio: 0.12,
+  /**
+   * 簇大小循环模式。1 = Hero 独占，2/3 = 多气泡对话组。
+   * 这个模式让 Hero 占比稳定落在 2/6 ≈ 33%，正好贴着
+   * ChatMVComposition 的 HERO_MAX_RATIO(0.35)，无需事后合并救场。
+   */
+  clusterPattern: [2, 3, 1, 2, 1, 3],
+  /**
+   * 簇间距上限（秒）。
+   *
+   * ⚠️ 这是「长时间没动画」的关键闸门。ChatMVComposition 的
+   * GROUP_MAX_SPAN_S 只约束组内气泡的时间跨度，约束不到「一组在屏幕上
+   * 停留多久」—— 后者由下一组何时开始决定。气泡稀疏时簇间距会被拉到
+   * 十几秒甚至几十秒，那一整段只有极微弱的 idle 呼吸，观感依然是静止。
+   * 超过这个上限就把大簇拆成单条铺开，保证入场事件的密度。
+   */
+  clusterStrideMaxS: 6,
+  /** 单条气泡的估计「演唱时长」上限（秒），用于给退场留窗口 */
+  estimatedSungMaxS: 3,
+  /** 估计演唱时长占簇间距的比例 */
+  estimatedSungRatio: 0.75,
+} as const;
+
+/** 合成节拍的默认 BPM（嘻哈 / 流行常见区间的中位数） */
+const FALLBACK_BPM = 92;
+
+/**
+ * 合成等间隔节拍。
+ *
+ * uniform 降级时 lyricsTimeline 往往也是空的，`beats` 就成了空数组，
+ * 于是 ChatMVComposition 的常驻律动层失去鼓点分量、reAccent 二次脉冲
+ * 完全不触发 —— 画面只剩极微弱的自呼吸，观感依然接近静止。
+ * 这里按固定 BPM 造一组节拍，让律动层在无时间戳场景下也能满血工作。
+ */
+function syntheticBeats(totalFrames: number, fps: number, bpm = FALLBACK_BPM): number[] {
+  const step = (60 / bpm) * fps;
+  if (!Number.isFinite(step) || step <= 0) return [];
+  const out: number[] = [];
+  for (let f = 0; f < totalFrames; f += step) out.push(Math.round(f));
+  return out;
+}
+
+/**
+ * 节奏化均匀分配。
+ *
+ * 相比旧的 `i * per` 等间隔，这里做了三件事：
+ *   - 分簇：产生 Hero / 对话组交替，动画类型不再单一
+ *   - 留边距：前奏尾奏留白，首条气泡不在第 0 帧（避免 anticipation 吃掉入场）
+ *   - endFrame 留窗口：不顶到下一簇起点，保证退场动画有帧可播
+ */
+function uniformTimings(
+  bubbles: BubbleData[],
+  totalFrames: number,
+  fps: number,
+): BubbleData[] {
+  const n = bubbles.length;
+  if (n === 0) return [];
+  const lastAllowed = Math.max(totalFrames - 1, 0);
+
+  // 1) 边距：气泡稀疏时留白，密集时（放不下）自动放弃边距
+  let intro = Math.round(
+    Math.min(totalFrames * UNIFORM_LAYOUT.introRatio, UNIFORM_LAYOUT.introMaxS * fps),
+  );
+  let outro = Math.round(
+    Math.min(totalFrames * UNIFORM_LAYOUT.outroRatio, UNIFORM_LAYOUT.outroMaxS * fps),
+  );
+  if (totalFrames - intro - outro < n * MIN_GAP_FRAMES) {
+    intro = 0;
+    outro = 0;
+  }
+  const usable = Math.max(totalFrames - intro - outro, n * MIN_GAP_FRAMES);
+
+  // 2) 按模式分簇
+  const clusters: number[] = [];
+  let remaining = n;
+  let pi = 0;
+  while (remaining > 0) {
+    const pattern = UNIFORM_LAYOUT.clusterPattern;
+    const size = Math.min(pattern[pi % pattern.length], remaining);
+    clusters.push(size);
+    remaining -= size;
+    pi += 1;
+  }
+
+  // 2.5) 簇数下限：只在「簇间距离谱地大」时才补簇。
+  //      注意不能为了压缩停留时长而把所有簇拆成单条 —— 那会让 Hero 占比
+  //      冲到 90%+，重新变成「全片 Hero 独占」的老毛病。气泡本身稀疏是
+  //      客观事实（20 条撑 120s 就是平均 6s 一条），压不掉的长停留交给
+  //      ChatMVComposition 的自适应律动层（holdSeconds 越长律动越强）处理。
+  const strideCapFrames = UNIFORM_LAYOUT.clusterStrideMaxS * fps;
+  const minClusters = Math.min(
+    // 最多拆到「每簇至少还有 2 条」，保住对话组结构
+    Math.ceil(n / 2),
+    Math.ceil(usable / strideCapFrames),
+  );
+  while (clusters.length < minClusters) {
+    let biggest = 0;
+    for (let i = 1; i < clusters.length; i += 1) {
+      if (clusters[i] > clusters[biggest]) biggest = i;
+    }
+    if (clusters[biggest] <= 2) break; // 只拆 3 条以上的簇
+    clusters[biggest] -= 1;
+    clusters.splice(biggest + 1, 0, 1);
+  }
+
+  const clusterStride = usable / clusters.length;
+  const maxClusterSize = Math.max(...clusters);
+  // 簇内间隔：簇间距越大越往上限靠，把入场事件铺开；
+  // 同时不能让一簇占满整个 stride，也不能突破分组阈值。
+  const innerGap = Math.max(
+    MIN_GAP_FRAMES,
+    Math.round(
+      Math.min(
+        Math.max(
+          UNIFORM_LAYOUT.clusterInnerGapMinS * fps,
+          clusterStride * UNIFORM_LAYOUT.clusterInnerGapRatio,
+        ),
+        UNIFORM_LAYOUT.clusterInnerGapMaxS * fps,
+        clusterStride / (maxClusterSize + 1),
+      ),
+    ),
+  );
+
+  // 3) 落帧
+  const starts: number[] = [];
+  clusters.forEach((size, k) => {
+    const base = intro + k * clusterStride;
+    for (let j = 0; j < size; j += 1) {
+      starts.push(Math.round(base + j * innerGap));
+    }
+  });
+
+  // 4) 单调递增 + 上界收敛（与主路径保持一致的不变量）
+  for (let i = 1; i < starts.length; i += 1) {
+    if (starts[i] < starts[i - 1] + MIN_GAP_FRAMES) starts[i] = starts[i - 1] + MIN_GAP_FRAMES;
+  }
+  if (starts[starts.length - 1] > lastAllowed) {
+    starts[starts.length - 1] = lastAllowed;
+    for (let i = starts.length - 2; i >= 0; i -= 1) {
+      const ceiling = starts[i + 1] - MIN_GAP_FRAMES;
+      if (starts[i] > ceiling) starts[i] = Math.max(0, ceiling);
+    }
+  }
+
+  // 5) endFrame：估一个「唱完」时刻，并给退场留出余量。
+  //    顶满到下一条起点会让退场窗口被挤掉（详见 computeBubbleTimings 第 4 步注释）。
+  //    极端密集时相邻间隔可能只有 MIN_GAP_FRAMES，此时按比例留余量而不是
+  //    硬减固定帧数 —— 否则下限 startFrame + MIN_GAP_FRAMES 会反过来盖掉余量。
+  const estimatedSung = Math.round(
+    Math.min(
+      clusterStride * UNIFORM_LAYOUT.estimatedSungRatio,
+      UNIFORM_LAYOUT.estimatedSungMaxS * fps,
+    ),
+  );
   return bubbles.map((b, i) => {
-    const startFrame = Math.min(i * per, Math.max(totalFrames - 1, 0));
-    return { ...b, startFrame, endFrame: Math.min(startFrame + per, totalFrames) };
+    const startFrame = starts[i];
+    const nextStart = i + 1 < starts.length ? starts[i + 1] : lastAllowed + 1;
+    const room = Math.max(nextStart - startFrame, 1);
+    // 退场余量：至少 1 帧，正常情况下留 MIN_GAP_FRAMES
+    const reserve = Math.max(1, Math.min(MIN_GAP_FRAMES, Math.floor(room * 0.4)));
+    const ceiling = Math.min(nextStart - reserve, lastAllowed);
+    const endFrame = Math.max(
+      startFrame + 1,
+      Math.min(startFrame + estimatedSung, ceiling),
+    );
+    return { ...b, startFrame, endFrame };
   });
 }
 
@@ -435,11 +619,34 @@ export function computeBubbleTimings(params: {
         ).sort((a, b) => a - b)
       : [];
 
+  /**
+   * 舞台律动用的 beats。
+   *
+   * 绝不返回空数组 —— 空 beats 会让 ChatMVComposition 常驻律动层的鼓点分量
+   * 和 reAccent 二次脉冲同时失效，画面重新退化成近似静止。
+   * 逐级降级：timeline 行首 → 词级起始帧 → 按 FALLBACK_BPM 合成节拍。
+   */
+  const beatsForStage = (): number[] => {
+    const real = beatsFromTimeline();
+    if (real.length > 1) return real;
+    if (hasWords) {
+      const fromWords = Array.from(
+        new Set(
+          (lyricsWords as LyricWord[])
+            .filter((w) => typeof w.s === 'number')
+            .map((w) => Math.round(w.s * fps)),
+        ),
+      ).sort((a, b) => a - b);
+      if (fromWords.length > 1) return fromWords;
+    }
+    return syntheticBeats(totalFrames, fps);
+  };
+
   // 无对齐所需数据 → 均匀分配
   if (!hasMap || !hasLyrics || (!hasTimeline && !hasWords)) {
     return {
-      bubbles: uniformTimings(bubbles, totalFrames),
-      beats: beatsFromTimeline(),
+      bubbles: uniformTimings(bubbles, totalFrames, fps),
+      beats: beatsForStage(),
       report: {
         strategy: 'uniform',
         singableLines: 0,
@@ -509,8 +716,8 @@ export function computeBubbleTimings(params: {
 
   if (dialogueSpan.size === 0) {
     return {
-      bubbles: uniformTimings(bubbles, totalFrames),
-      beats: beatsFromTimeline(),
+      bubbles: uniformTimings(bubbles, totalFrames, fps),
+      beats: beatsForStage(),
       report: {
         strategy: 'uniform',
         singableLines: singable,
@@ -600,21 +807,46 @@ export function computeBubbleTimings(params: {
     if (frames[i] < frames[i - 1] + MIN_GAP_FRAMES) frames[i] = frames[i - 1] + MIN_GAP_FRAMES;
   }
 
-  // 4) endFrame：优先用歌词唱完的时间，但不越过下一个气泡
+  // 3.6) 上界收敛：单调化过程会把帧号累加推到 totalFrames 之外。
+  //      越界气泡永远不会被渲染，但它们仍然参与 ChatMVComposition 的
+  //      group.end 计算（group.end = 下一组的 start），于是最后一个可见组的
+  //      end 落在视频时长之外 → 它的退场永远等不到 → 尾段静止定格到片尾。
+  //      这里从后往前压缩间隔，把所有帧号收进合法区间。
+  const lastAllowed = Math.max(totalFrames - 1, 0);
+  if (frames.length > 0 && frames[frames.length - 1] > lastAllowed) {
+    frames[frames.length - 1] = lastAllowed;
+    for (let i = frames.length - 2; i >= 0; i -= 1) {
+      const ceiling = frames[i + 1] - MIN_GAP_FRAMES;
+      if (frames[i] > ceiling) frames[i] = Math.max(0, ceiling);
+    }
+  }
+
+  // 4) endFrame：只表达「这句唱完了」这一个语义。
+  //
+  //    ⚠️ 旧实现是 Math.max(sungEnd, nextStart)，会让 endFrame 恒 ≥ 下一条气泡的
+  //    startFrame。而 ChatMVComposition 里 group.end 正好等于下一组第一条的
+  //    startFrame，于是 bubbleExitStart = max(exitStart, endFrame) ≥ group.end，
+  //    而渲染过滤器在 frame >= group.end 就把这组摘掉了 —— 结果退场进度恒为 0，
+  //    9 种退场变体一帧都播不出来，表现为气泡「硬切消失、看着像没动画」。
   const out = bubbles.map((b, i) => {
     const sub = getSubSpan(b);
-    const nextStart = i + 1 < frames.length ? frames[i + 1] : totalFrames;
     const sungEnd = sub ? Math.round(sub.endS * fps) : frames[i] + fps;
     return {
       ...b,
       startFrame: frames[i],
-      endFrame: Math.max(frames[i] + MIN_GAP_FRAMES, Math.min(Math.max(sungEnd, nextStart), totalFrames)),
+      endFrame: Math.max(
+        frames[i] + MIN_GAP_FRAMES,
+        Math.min(sungEnd, Math.max(totalFrames - 1, 0)),
+      ),
     };
   });
 
   return {
     bubbles: out,
-    beats: beatsFromTimeline(),
+    // 主路径同样不能返回空 beats：只有 lyricsWords 没有 timeline 时
+    // beatsFromTimeline() 是空的，会让常驻律动层失去鼓点分量。
+    // 逐级降级：真实行首 → 词级起始 → 合成节拍。
+    beats: beatsForStage(),
     report: {
       strategy,
       singableLines: singable,
