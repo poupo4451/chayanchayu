@@ -19,7 +19,11 @@ const db = cloud.database();
 exports.main = async (event, context) => {
   const { topic, dialogueTone, musicGenre } = event;
   const wxContext = cloud.getWXContext();
-  const openid = wxContext.OPENID || 'mock-user';
+  const openid = wxContext.OPENID || '';
+
+  if (!openid) {
+    return { success: false, message: '无法获取用户标识，请重新进入小程序后再试' };
+  }
 
   if (!topic) {
     return { success: false, message: '缺少 topic 参数' };

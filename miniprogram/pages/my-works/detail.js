@@ -365,7 +365,8 @@ Page({
   onShareAppMessage() {
     const work = this.data.work || {};
     return {
-      title: `${work.title || '我的作品'} - 言语生声`,
+      title: `${work.title || '我的作品'} - 一句话创作你的歌词动画`,
+      imageUrl: '/images/share-cover.jpg',
       path: `/pages/my-works/detail?workId=${encodeURIComponent(work.id || '')}&title=${encodeURIComponent(work.title || '')}&duration=${encodeURIComponent(work.duration || '')}&videoUrl=${encodeURIComponent(work.videoUrl || '')}&createdAt=${encodeURIComponent(work.createdAt || '')}`,
     };
   },

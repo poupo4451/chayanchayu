@@ -33,23 +33,58 @@ const STEP_META = [
 const FLOW = STEP_META.map((s) => s.key);
 
 /**
- * 各阶段的进度区间。
- * 服务端 progress 在不同分支会写出 60/70/75 等非单调值（见 pollMusicStatus），
- * 因此前端只把它当「下界参考」，最终展示值取 max 并钳制到区间内，保证不倒退。
+ * 各阶段的展示进度区间。
+ *
+ * 刻意不与服务端 progress 同刻度：进入本页时「编写对话」已在上一页完成、
+ * 「渲染气泡」也就一两秒，若沿用服务端绝对值（截图完成即写 45）会让进度条
+ * 一开场就停在 45%，用户完全看不到起步过程。
+ * 因此把这两步压到接近 0，把 0～99 几乎整段留给真正需要等待的歌词/作曲/合成。
  */
 const STAGE_RANGE = {
-  pending: [0, 8],
-  generating_dialogue: [8, 20],
-  generating_screenshots: [20, 45],
-  generating_lyrics: [45, 55],
-  generating_music: [55, 80],
-  rendering_video: [80, 99],
+  pending: [0, 2],
+  generating_dialogue: [0, 3],
+  generating_screenshots: [0, 5],
+  generating_lyrics: [5, 22],
+  generating_music: [22, 86],
+  rendering_video: [86, 99],
   completed: [100, 100],
 };
 
+/**
+ * 服务端在各阶段写出的 progress 里程碑 → 该阶段展示区间内的完成比例。
+ *
+ * 用查表而非线性折算，是因为服务端数值的间距和真实耗时严重不成比例：
+ * 作曲阶段「已提交给 Suno」（60/65）只需几秒，却和「音频已就绪」（70）
+ * 之间隔着 5～15 分钟，线性映射会让进度在开头几十秒内窜到一半再长期停滞。
+ * 取「不大于当前值的最大里程碑」，因此服务端非单调写值也不会导致进度倒退。
+ */
+const SERVER_MILESTONES = {
+  generating_screenshots: [[20, 0], [30, 0.3]],
+  generating_lyrics: [[45, 0]],
+  generating_music: [[55, 0], [60, 0.06], [65, 0.08], [70, 0.75]],
+  rendering_video: [[75, 0], [80, 0.25]],
+};
+
+/** 把服务端 progress 折算到当前阶段的展示刻度 */
+function toDisplayProgress(status, raw) {
+  const [lo, hi] = STAGE_RANGE[status] || [0, 0];
+  const milestones = SERVER_MILESTONES[status];
+  if (!milestones) return lo;
+
+  let ratio = 0;
+  milestones.forEach(([at, r]) => {
+    if (raw >= at && r > ratio) ratio = r;
+  });
+  return lo + ratio * (hi - lo);
+}
+
 const TICK_MS = 1000;
-/** 每秒向阶段上界指数逼近的系数：越小越「慢而不停」 */
-const CREEP_RATIO = 0.01;
+/**
+ * 每秒向阶段上界指数逼近的系数：越小越「慢而不停」。
+ * 时间常数 ≈ 1/0.004 = 250s，与作曲阶段 5～15 分钟的量级相称；
+ * 若取更大值，进度会在头一两分钟就贴到上界，之后长时间纹丝不动。
+ */
+const CREEP_RATIO = 0.004;
 
 /**
  * 进入本页多久后自动弹出订阅通知邀请。
@@ -211,8 +246,8 @@ Page({
     // 失败时保留最后已知阶段，让用户知道「卡在哪一步」
     const flowStatus = failed ? this.lastFlowStatus : task.status;
 
-    const [lo] = STAGE_RANGE[task.status] || [0, 0];
-    this.serverProgress = Math.max(this.serverProgress, task.progress || 0, lo);
+    const mapped = toDisplayProgress(task.status, task.progress || 0);
+    this.serverProgress = Math.max(this.serverProgress, mapped);
     this.commitProgress(this.serverProgress);
 
     this.setData({
@@ -338,7 +373,7 @@ Page({
 
   /** 弹层上的「好，完成后通知我」 */
   onNotifyAccept() {
-    this.setData({ notifyModal: false });
+    // requestSubscribeMessage 必须紧贴用户 tap 同步发起；不要先做异步操作或等弹层动画结束
     this.requestNotify();
   },
 
@@ -364,9 +399,13 @@ Page({
    * 因此授权链路依然成立。
    */
   requestNotify() {
-    requestMvDoneSubscribe().then(({ subscribed, banned }) => {
+    requestMvDoneSubscribe().then(({ subscribed, banned, state, errMsg }) => {
+      this.setData({ notifyModal: false });
+
       if (!subscribed) {
-        if (banned) {
+        console.warn('subscribe not accepted', { state, errMsg });
+
+        if (banned || state === 'ban') {
           // 用户曾勾选「总是保持以上选择」并拒绝，本次不会弹窗。
           // 卡片文案会切换成手动开启路径，避免他反复点却毫无反应。
           this.setData({ notifyState: 'banned' });
@@ -375,7 +414,19 @@ Page({
             icon: 'none',
             duration: 3200,
           });
+          return;
         }
+
+        const toastTitleMap = {
+          reject: '你取消了通知授权',
+          filter: '订阅模板被过滤，请检查模板配置',
+          unsupported: '当前微信版本不支持订阅消息',
+        };
+        const title = toastTitleMap[state]
+          || (/TAP gesture/i.test(errMsg || '') ? '请点击按钮后立即授权通知' : '')
+          || errMsg
+          || '未能唤起通知授权，请重试';
+        wx.showToast({ title, icon: 'none', duration: 3200 });
         return;
       }
 
@@ -384,7 +435,11 @@ Page({
       setTaskNotify(this.data.taskId, MV_DONE_TMPL_ID).catch((e) => {
         console.error('setTaskNotify failed', e);
         this.setData({ notifyState: 'off' });
-        wx.showToast({ title: '通知开启失败，请重试', icon: 'none' });
+        wx.showToast({
+          title: e.message || '通知开启失败，请重试',
+          icon: 'none',
+          duration: 3200,
+        });
       });
     });
   },

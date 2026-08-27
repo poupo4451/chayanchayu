@@ -1,7 +1,43 @@
 const { getTaskDetail, startDialogue, regenerateDialogue, confirmDialogue } = require('../../utils/api');
 const { showError } = require('../../utils/error-tip');
 
-const TOTAL_AVATARS = 16;
+/**
+ * 头像素材池（须与 miniprogram/images/avatars/ 下的文件名、
+ * 以及云函数 generateDialogue/avatarAssign.js 的角色 id 保持一致）。
+ * 注意：avatarId 是角色化字符串（如 'male-rich-heir'），不是数字下标。
+ */
+const AVATAR_POOL = {
+  male: [
+    'male-1',
+    'male-2',
+    'male-3',
+    'male-4',
+    'male-ordinary',
+    'male-playboy',
+    'male-rich-heir',
+    'male-underdog',
+  ],
+  female: [
+    'female-1',
+    'female-2',
+    'female-3',
+    'female-4',
+    'female-green-tea-1',
+    'female-green-tea-2',
+    'female-playgirl',
+    'female-underdog',
+  ],
+};
+
+const ALL_AVATARS = [...AVATAR_POOL.male, ...AVATAR_POOL.female];
+
+const DEFAULT_LEFT_AVATAR = 'male-ordinary';
+const DEFAULT_RIGHT_AVATAR = 'female-green-tea-1';
+
+/** 由 avatarId 反推性别，用于换头像时保持性别不变（避免与对话内容矛盾） */
+function genderOfAvatar(avatarId) {
+  return String(avatarId || '').startsWith('female') ? 'female' : 'male';
+}
 
 Page({
   data: {
@@ -9,8 +45,8 @@ Page({
     dialogue: [],
     loading: true,
     // ── 头像栏 ──
-    leftAvatarId: 1,
-    rightAvatarId: 8,
+    leftAvatarId: DEFAULT_LEFT_AVATAR,
+    rightAvatarId: DEFAULT_RIGHT_AVATAR,
     leftName: '',
     rightName: '',
     // ── 拖拽排序 ──
@@ -124,18 +160,18 @@ Page({
 
   /** 从对话中提取左右参与者信息 */
   extractParticipants(dialogue) {
-    let leftAvatarId = 1;
-    let rightAvatarId = 8;
+    let leftAvatarId = DEFAULT_LEFT_AVATAR;
+    let rightAvatarId = DEFAULT_RIGHT_AVATAR;
     let leftName = '';
     let rightName = '';
     for (const line of dialogue) {
       if (line.type === 'time') continue;
       if (line.role === 'left' && !leftName) {
-        leftAvatarId = line.avatarId || 1;
+        leftAvatarId = line.avatarId || DEFAULT_LEFT_AVATAR;
         leftName = line.name || '';
       }
       if (line.role === 'right' && !rightName) {
-        rightAvatarId = line.avatarId || 8;
+        rightAvatarId = line.avatarId || DEFAULT_RIGHT_AVATAR;
         rightName = line.name || '';
       }
       if (leftName && rightName) break;
@@ -143,7 +179,7 @@ Page({
     this.setData({ leftAvatarId, rightAvatarId, leftName, rightName });
   },
 
-  /** 切换左头像：排除当前，随机从 16 个中选 */
+  /** 切换左头像：在同性别池内随机换一个，排除当前 */
   onChangeLeftAvatar() {
     const newId = this.getRandomAvatarId(this.data.leftAvatarId);
     const dialogue = this.data.dialogue.map(line => {
@@ -165,12 +201,15 @@ Page({
     this.setData({ rightAvatarId: newId, dialogue });
   },
 
+  /**
+   * 在与当前头像相同性别的池中随机取一个不同的 avatarId。
+   * 保持性别不变，避免男角色突然换成女头像、与对话内容矛盾。
+   */
   getRandomAvatarId(currentId) {
-    let newId;
-    do {
-      newId = Math.floor(Math.random() * TOTAL_AVATARS) + 1;
-    } while (newId === currentId);
-    return newId;
+    const pool = AVATAR_POOL[genderOfAvatar(currentId)] || ALL_AVATARS;
+    const candidates = pool.filter((id) => id !== currentId);
+    if (!candidates.length) return currentId;
+    return candidates[Math.floor(Math.random() * candidates.length)];
   },
 
   /** 交换 A / B：顶部头像栏交换 + 所有非 time 气泡 role 互换（保留原说话人的头像和名字） */

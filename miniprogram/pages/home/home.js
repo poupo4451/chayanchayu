@@ -126,7 +126,8 @@ Page({
 
   onShareAppMessage() {
     return {
-      title: '言语生声',
+      title: '一句话创作你的歌词动画 - 言语生声',
+      imageUrl: '/images/share-cover.jpg',
     };
   },
 });

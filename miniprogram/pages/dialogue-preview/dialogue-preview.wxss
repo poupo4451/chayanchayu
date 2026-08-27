@@ -148,14 +148,18 @@
 }
 
 /* 拖拽态只改视觉不改盒模型：
-   原实现把 padding 从 0 突变为 16rpx，导致长按瞬间高度跳动，
+   上下 padding 让浮起卡片与气泡之间留出呼吸，但用等量负 margin 抵消，
+   保证占位高度与静态时一致 —— 否则长按瞬间高度跳动，
    且使 dragItemHeight 测量值与实际不符、影响落点计算。
+   背景取页面底色（略深于白气泡），避免白气泡在纯白卡片上失去边界。
    此处不能用 transform，会被 WXML 行内的 translateY 覆盖。 */
 .drag-active {
   position: relative;
   z-index: 20;
-  background: #FFFFFF;
-  border-radius: 20rpx;
+  padding: 12rpx 32rpx;
+  margin: -12rpx 0;
+  background: #EDEDED;
+  border-radius: 0;
   box-shadow: 0 8rpx 28rpx rgba(0, 0, 0, 0.14);
   transition: none;
 }

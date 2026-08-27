@@ -11,7 +11,7 @@
         <text class="hero-name {{userProfile.nickName ? '' : 'hero-name-empty'}}">{{userProfile.nickName || '点击设置昵称'}}</text>
         <text class="hero-edit">编辑</text>
       </view>
-      <text class="hero-count">{{doneCount}} 个作品{{pendingCount ? ' · ' + pendingCount + ' 个生成中' : ''}}</text>
+      <text class="hero-count">{{doneCount}} 个作品</text>
     </view>
   </view>
 

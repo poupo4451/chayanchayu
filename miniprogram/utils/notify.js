@@ -33,40 +33,52 @@ const MV_DONE_TMPL_ID = 'dlEWnEzXRnGb803dxPmtJAYa83uueDqfKzDDiLq3Kvc';
  * 注意「弹层自动出现」不影响这条约束——邀请弹层由定时器弹出，但用户点击弹层上的
  * 按钮仍是真实 tap，授权链路成立。
  *
- * @returns {Promise<{ subscribed: boolean, banned: boolean }>}
+ * @returns {Promise<{ subscribed: boolean, banned: boolean, state: string, errMsg: string }>}
  *   subscribed - 用户是否同意接收
  *   banned     - 用户是否已勾选「总是保持以上选择」并拒绝（此后不再弹窗，
  *                只能引导去右上角「…」→ 设置 → 订阅消息 里手动开启）
+ *   state      - 微信对当前模板的返回状态：accept / reject / ban / filter / fail / unsupported
+ *   errMsg     - 微信原始错误信息，便于排查模板 ID、手势上下文、基础库等问题
  */
 function requestMvDoneSubscribe() {
   return new Promise((resolve) => {
     if (!wx.requestSubscribeMessage) {
       // 基础库过低，静默降级：不阻断生成流程
-      resolve({ subscribed: false, banned: false });
+      resolve({
+        subscribed: false,
+        banned: false,
+        state: 'unsupported',
+        errMsg: '当前微信版本不支持订阅消息',
+      });
       return;
     }
 
     wx.requestSubscribeMessage({
       tmplIds: [MV_DONE_TMPL_ID],
       success: (res) => {
-        const state = res && res[MV_DONE_TMPL_ID];
+        console.log('requestSubscribeMessage success', res);
+        const state = (res && res[MV_DONE_TMPL_ID]) || 'unknown';
         // state 取值：accept / reject / ban / filter
         // ban = 后台已封禁该模板；filter = 模板被过滤（如内容不符规范）
         resolve({
           subscribed: state === 'accept',
           banned: state === 'ban',
+          state,
+          errMsg: (res && res.errMsg) || '',
         });
       },
       fail: (err) => {
         const msg = (err && err.errMsg) || '';
         // 用户曾勾选「总是保持以上选择」并选择拒绝时，本次不会弹窗、直接 fail，
         // 这属于正常业务分支而非异常，只记 warn 不打扰用户
-        console.warn('requestSubscribeMessage failed', msg);
+        console.warn('requestSubscribeMessage failed', err || msg);
         resolve({
           subscribed: false,
           // 10004/10005 及带 "TAP gesture" 的错误都不是"被永久拒绝"，
-          // 只有明确的拒绝态才引导去设置页，避免误导用户
-          banned: /reject|ban/i.test(msg),
+          // 只有明确的 ban 才引导去设置页，避免误导用户
+          banned: /ban/i.test(msg),
+          state: 'fail',
+          errMsg: msg,
         });
       },
     });

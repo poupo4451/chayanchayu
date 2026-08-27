@@ -563,6 +563,9 @@ Page({
   },
 
   onShareAppMessage() {
-    return { title: '我的作品 - 言语生声' };
+    return {
+      title: '一句话创作你的歌词动画 - 言语生声',
+      imageUrl: '/images/share-cover.jpg',
+    };
   },
 });
