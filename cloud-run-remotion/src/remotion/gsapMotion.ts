@@ -32,6 +32,9 @@ import {
   FLASH_EXIT_PARAMS,
   // 节拍衰减
   BEAT_DECAY,
+  BEAT_ATTACK_S,
+  // 入场后沉降包络
+  SETTLE,
 } from './animation-config';
 
 // ─────────────────────────────────────────────────────────────────
@@ -843,10 +846,45 @@ export function dynamicExitFrames(gapFrames: number): number {
 }
 
 /**
- * 节拍脉冲：返回距离最近一个已过去节拍的衰减能量 0..1。
- * 用来给画面做「随鼓点呼吸」的律动。
+ * 单个节拍的能量包络：起振 → 达峰 → 指数衰减。
+ *
+ * @param dt      距该节拍已过去的秒数（可为负 = 节拍还没到）
+ * @param decay   衰减系数
+ * @param attack  起振时长（秒）；<= 0 时退化为原来的纯衰减（阶跃）
  */
-export function beatEnergy(frame: number, beats: number[], fps: number, decay = BEAT_DECAY): number {
+function beatEnvelope(dt: number, decay: number, attack: number): number {
+  if (dt < 0) return 0;
+  if (attack <= 0) return Math.exp(-dt * decay);
+  if (dt < attack) {
+    // smoothstep（3r²-2r³）而非线性：保证起振段首尾的一阶导都为 0，
+    // 否则起振开始/结束的瞬间会有速度突变，仍然看得出「顿一下」。
+    const r = dt / attack;
+    return r * r * (3 - 2 * r);
+  }
+  return Math.exp(-(dt - attack) * decay);
+}
+
+/**
+ * 节拍脉冲：返回当前帧的节拍能量 0..1，用来给画面做「随鼓点呼吸」的律动。
+ *
+ * 【为什么要取相邻两拍的较大值】
+ * 单拍包络在 dt=0（节拍那一帧）输出 0，如果只算当前拍，能量会在每个鼓点
+ * 从上一拍的残值**跌到 0** 再爬起来 —— 把原来的向上阶跃换成向下阶跃，没解决问题。
+ * 取 max(上一拍的衰减尾巴, 当前拍的起振) 后：
+ *   - dt=0 时当前拍为 0，上一拍尾巴接管 → 曲线连续
+ *   - 起振超过尾巴后当前拍接管 → 平滑达峰
+ * 结果是每个鼓点都有完整的「起振 → 达峰 → 衰减」过程，不再有任何阶跃。
+ *
+ * 只回看一拍即可：attack（0.05s）远小于最密的节拍间隔（Suno 词级约 0.2s），
+ * 更早的节拍其尾巴一定已低于上一拍。
+ */
+export function beatEnergy(
+  frame: number,
+  beats: number[],
+  fps: number,
+  decay = BEAT_DECAY,
+  attackS = BEAT_ATTACK_S,
+): number {
   if (!beats.length) return 0;
   // 二分找最后一个 <= frame 的节拍
   let lo = 0;
@@ -862,8 +900,11 @@ export function beatEnergy(frame: number, beats: number[], fps: number, decay = 
     }
   }
   if (idx < 0) return 0;
-  const dt = (frame - beats[idx]) / fps;
-  return Math.exp(-dt * decay);
+
+  const cur = beatEnvelope((frame - beats[idx]) / fps, decay, attackS);
+  if (idx === 0) return cur;
+  const prev = beatEnvelope((frame - beats[idx - 1]) / fps, decay, attackS);
+  return Math.max(cur, prev);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -881,6 +922,23 @@ export interface IdleMotionState {
 }
 
 /**
+ * 入场后沉降包络：把「持续抖动」改成「先静止、再小幅度」。
+ *
+ * 返回 [0, SETTLE.maxMultiplier] 的幅度系数：
+ *   - heldS <= stillS         → 0（完全静止）
+ *   - stillS ~ stillS+rampS   → smoothstep 平滑爬升
+ *   - 之后                     → 恒定 maxMultiplier（< 1，保证小幅度）
+ *
+ * 用 smoothstep（3r²-2r³）而不是线性，避免静止结束瞬间出现速度突变。
+ */
+export function settleEnvelope(heldS: number): number {
+  if (heldS <= SETTLE.stillS) return 0;
+  const r = Math.min((heldS - SETTLE.stillS) / SETTLE.rampS, 1);
+  const smooth = r * r * (3 - 2 * r);
+  return smooth * SETTLE.maxMultiplier;
+}
+
+/**
  * 舞台常驻律动。
  *
  * 关键点：`beatEnergy` 这里传的是**当前帧** `frame`，而不是气泡的固定
@@ -892,8 +950,10 @@ export interface IdleMotionState {
  *   - creep    ：Ken-Burns 慢推，长镜头持续变化
  *   - drift    ：X/Y 异频慢漂，避免线性平移的机械感
  *
- * 长停留自适应：holdSeconds 越大，呼吸与慢漂幅度按 boost 曲线放大，
- * 用来兜住气泡稀疏（uniform 降级）时 8~30 秒的超长组停留。
+ * 【节奏设计】前三者都乘上 settleEnvelope：入场后 SETTLE.stillS 秒内幅度为 0
+ * （完全静止，让观众看清内容），随后平滑升到一个小幅度稳态。
+ * creep 故意不受包络约束 —— 它是单调慢推，不产生抖动感，
+ * 是长镜头里最安全的「画面仍在变化」保证。
  *
  * @param frame      当前帧
  * @param groupStart 本组进场帧，用于算已停留时长
@@ -921,12 +981,15 @@ export function stageIdleMotion(
   );
   const boost = 1 + ramp * (IDLE_MOTION.boostMaxMultiplier - 1);
 
-  const punch = 1 + beat * IDLE_MOTION.beatPunch;
-  const breathe = 1 + Math.sin(t * IDLE_MOTION.breatheHz + phase) * IDLE_MOTION.breatheAmp * boost;
+  // 沉降包络：入场后先完全静止，再平滑升到小幅度稳态
+  const amp = settleEnvelope(t) * boost;
+
+  const punch = 1 + beat * IDLE_MOTION.beatPunch * amp;
+  const breathe = 1 + Math.sin(t * IDLE_MOTION.breatheHz + phase) * IDLE_MOTION.breatheAmp * amp;
   const creep = 1 + Math.min(t * IDLE_MOTION.creepPerSecond, IDLE_MOTION.creepMax);
 
-  const x = Math.sin(t * IDLE_MOTION.driftXHz + phase) * IDLE_MOTION.driftXPx * boost;
-  const y = Math.cos(t * IDLE_MOTION.driftYHz + phase * 0.7) * IDLE_MOTION.driftYPx * boost;
+  const x = Math.sin(t * IDLE_MOTION.driftXHz + phase) * IDLE_MOTION.driftXPx * amp;
+  const y = Math.cos(t * IDLE_MOTION.driftYHz + phase * 0.7) * IDLE_MOTION.driftYPx * amp;
 
   return { scale: punch * breathe * creep, x, y, beat };
 }
@@ -938,8 +1001,11 @@ export interface ReAccentState {
 
 /**
  * 长驻气泡的二次脉冲。
- * 气泡停留超过 RE_ACCENT.afterSeconds 后，每逢鼓点自己轻微 pop 一下，
- * 把「入场完了就再也不动」的长镜头救活。相邻气泡旋转方向相反，避免整齐感。
+ * 只在停留超过 RE_ACCENT.afterSeconds（真正的长镜头）后才启用，
+ * 每逢鼓点轻微 pop 一下，避免长镜头彻底死掉。相邻气泡旋转方向相反。
+ *
+ * 【为什么要淡入】旧实现在跨过 afterSeconds 的那一帧突然开始全幅脉冲，
+ * 观感上是「忽然抖起来」。这里用 2 秒 smoothstep 淡入，让它悄悄出现。
  *
  * @param bubbleStart 该气泡的入场帧
  * @param seed        用于决定旋转方向
@@ -955,9 +1021,13 @@ export function reAccentMotion(
   if (held < RE_ACCENT.afterSeconds) return { scale: 1, rotate: 0 };
   const e = beatEnergy(frame, beats, fps, RE_ACCENT.beatDecay);
   if (e <= 0.001) return { scale: 1, rotate: 0 };
+  // 跨过阈值后 2 秒内平滑淡入，避免突然抖起来
+  const r = Math.min((held - RE_ACCENT.afterSeconds) / 2, 1);
+  const fadeIn = r * r * (3 - 2 * r);
+  const amp = e * fadeIn;
   const dir = seed % 2 === 0 ? 1 : -1;
   return {
-    scale: 1 + e * RE_ACCENT.scale,
-    rotate: dir * e * RE_ACCENT.rotate,
+    scale: 1 + amp * RE_ACCENT.scale,
+    rotate: dir * amp * RE_ACCENT.rotate,
   };
 }

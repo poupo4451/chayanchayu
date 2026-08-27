@@ -18,11 +18,64 @@ import {
   type EnterVariant,
   type MotionState,
 } from './gsapMotion';
-import { CANVAS_WIDTH, GROUP_SCALE_RANGE } from './animation-config';
+import {
+  CANVAS_WIDTH,
+  GROUP_SCALE_RANGE,
+  STAGE_SAFE_AREA_RATIO,
+  STAGE_DYNAMIC_HEADROOM,
+  NORMAL_PEAK_WIDTH_RATIO,
+  HERO_PEAK_WIDTH_RATIO,
+} from './animation-config';
 
-/** 安全区：两侧各预留 1% 留白，内容在 98% 画布宽度内缩放显示 */
-const SAFE_AREA_RATIO = 0.98;
-const SAFE_WIDTH = CANVAS_WIDTH * SAFE_AREA_RATIO;
+/**
+ * ═══ 舞台缩放的安全区约束 ═══════════════════════════════════════════
+ *
+ * 需求：气泡容器入场后的稳定状态不得超出画面边缘，且至少保留 5% 留白。
+ *
+ * CONTAINER_WIDTH 是容器在 scale=1 时的固定宽度（948px @ 720px 画布），
+ * 本身就比画布宽，所以「容器视觉宽度 = CONTAINER_WIDTH × 总缩放」，
+ * 约束「视觉宽度 ≤ CANVAS_WIDTH × ratio」等价于
+ * 「总缩放 ≤ CANVAS_WIDTH × ratio / CONTAINER_WIDTH」。
+ *
+ * 总缩放由两类分量相乘：
+ *   静态：sceneScale（每组抽定一次，产生推拉镜头感）× Hero 加成
+ *   动态：idle.scale（呼吸 × 鼓点 × Ken-Burns 慢推）× reAccent 二次脉冲
+ *
+ * 因此按「峰值宽度」反推静态基准：
+ *   静态基准 = 目标峰值缩放 ÷ STAGE_DYNAMIC_HEADROOM
+ * 这样动态分量推到峰值时刚好贴住目标宽度，而不是被上限钳出一段平台。
+ */
+
+/** 把「目标宽度占画布的比例」换算成允许的总缩放上限 */
+const scaleForWidthRatio = (ratio: number): number =>
+  (CANVAS_WIDTH * ratio) / CONTAINER_WIDTH;
+
+/** 绝对不可逾越的总缩放上限（对应 STAGE_SAFE_AREA_RATIO） */
+const MAX_STAGE_SCALE = scaleForWidthRatio(STAGE_SAFE_AREA_RATIO);
+
+/** 普通组 / Hero 组的静态基准缩放 */
+const NORMAL_BASE_SCALE = scaleForWidthRatio(NORMAL_PEAK_WIDTH_RATIO) / STAGE_DYNAMIC_HEADROOM;
+const HERO_BASE_SCALE = scaleForWidthRatio(HERO_PEAK_WIDTH_RATIO) / STAGE_DYNAMIC_HEADROOM;
+
+/**
+ * sceneScale 归一化系数。
+ *
+ * GROUP_SCALE_RANGE 的语义是「组间推拉镜头感」的**相对**差异，不是绝对缩放。
+ * 除以区间上限后映射到 (0.86, 1]：最大的那一档正好等于基准缩放（即目标峰值宽度），
+ * 其余组按比例略小。这样既保留了推拉感，又保证没有任何一组会超出安全区。
+ *
+ * 旧实现把 sceneScale 直接当绝对缩放乘上去，再乘 fitScale / Hero 加成，
+ * 最终宽度完全失控 —— 这是气泡超出边缘的根本原因。
+ */
+const sceneScaleNorm = (sceneScale: number): number => sceneScale / GROUP_SCALE_RANGE.max;
+
+/**
+ * 末端兜底：把「静态基准 × 全部动态分量」的结果钳进安全区。
+ *
+ * 正常情况下 STAGE_DYNAMIC_HEADROOM 已预留够，这里不会真的生效。
+ * 它只防止将来调大 IDLE_MOTION / RE_ACCENT 幅度却忘了同步 headroom。
+ */
+const clampStageScale = (scale: number): number => Math.min(scale, MAX_STAGE_SCALE);
 
 interface ChatMVProps {
   bubbles: BubbleData[];
@@ -99,6 +152,28 @@ const SINGLE_ENTER_MAX_S = 0.55;
 const DENSE_WAVE_ENERGY_BOOST = 1.4;
 /** 单条气泡允许的最大绝对提前量（秒），超过此值强制按歌词时间出场 */
 const MAX_INDIVIDUAL_ADVANCE_S = 0.12;
+/**
+ * 组停留超过这么久（秒）就周期性「重新入场」，杜绝长镜头冻帧。
+ *
+ * 【为什么需要这一层】
+ * Fix 1（lyricsAlign 的副歌重演）只能治「歌词重复但没有气泡事件」这一种成因。
+ * 纯器乐 Bridge、Suno 自行加长的间奏、以及 uniform 降级下气泡本就稀疏
+ * （20 条台词撑 120 秒 = 平均 6 秒一条）这些场景，组停留依然会长达十几秒。
+ * 那段时间只有 idle 呼吸（≈1.2% 缩放）和 reAccent（3% 缩放），在 720p 上
+ * 几乎不可察觉，观感就是「动画消失了」。
+ *
+ * 这里与时间戳数据完全无关：只要一组停留超过一个周期，就以当前周期起点为
+ * 新锚点把整组入场动画重播一次，视觉上等于切了个镜头。
+ * restageIndex === 0 时行为与未启用该逻辑时完全一致。
+ *
+ * 【为什么是 9 秒而不是 5 秒】restage 是「重新入场」，冲击力很强。
+ * 5 秒一次意味着 17 秒的长镜头里要炸 3 次，观感是原地抽搐而非节奏感。
+ * 9 秒配合 settleEnvelope（入场后先静止再小幅度）形成正确的节奏：
+ * 冲击 → 静止 → 小幅呼吸 → 再冲击。
+ */
+const RESTAGE_PERIOD_S = 9.0;
+/** 重演起点距退场窗口的最小安全余量（秒），避免重演和退场同时进行互相打架 */
+const RESTAGE_EXIT_GUARD_S = 0.4;
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -403,10 +478,31 @@ const BubbleGroup: React.FC<{
   const latestExitStart = Math.max(group.start, group.end - exitFrames);
   const waves = group.hero ? [] : buildWaves(group.items, group.start, group.end, fps);
 
+  // ── 长停留重演：每 RESTAGE_PERIOD_S 秒把整组入场重播一次 ──────────────
+  // restageIndex === 0（首个周期）时下面所有值都退化为原有行为。
+  const restagePeriod = Math.max(1, Math.round(RESTAGE_PERIOD_S * fps));
+  const restageIndex = Math.floor(Math.max(0, frame - group.start) / restagePeriod);
+  const restageBase = group.start + restageIndex * restagePeriod;
+  // 重演必须完整播完且不能撞进退场窗口，否则入场与退场会同时作用于同一条气泡
+  const restageActive =
+    restageIndex > 0 && restageBase < exitStart - Math.round(fps * RESTAGE_EXIT_GUARD_S);
+  // 每次重演换一档场景缩放，配合入场重播产生推拉镜头感
+  const stageScale = restageActive
+    ? computeSceneScale(groupIndex * 31 + restageIndex)
+    : group.sceneScale;
+
   // 常驻律动：入场播完到退场开始之间，靠这一层保证画面不静止。
-  // 传入本组预计停留时长，停得越久律动越明显（兜住 uniform 降级的超长停留）。
-  const holdSeconds = groupSpan / fps;
-  const idle = stageIdleMotion(frame, group.start, groupIndex, beats, fps, holdSeconds);
+  // 传入本组预计停留时长，停得越久律动略明显一点（兜住超长停留不至于死板）。
+  //
+  // ⚠️ 计时锚点必须用 restageBase 而不是 group.start：
+  //    stageIdleMotion 内部的 settleEnvelope 依赖「入场后已过多久」来决定
+  //    先静止再小幅度。重演相当于重新入场，包络也必须跟着重置，
+  //    否则重演瞬间气泡一边播炸屏入场、一边已在做稳态呼吸，两者叠加又变成抖动。
+  const idleAnchor = restageActive ? restageBase : group.start;
+  const holdSeconds = restageActive
+    ? RESTAGE_PERIOD_S
+    : groupSpan / fps;
+  const idle = stageIdleMotion(frame, idleAnchor, groupIndex, beats, fps, holdSeconds);
 
   // ── Hero 独占组：单条气泡炸屏 ──────────────────────────────────────
   if (group.hero) {
@@ -414,18 +510,37 @@ const BubbleGroup: React.FC<{
     const enterFrames = dynamicEnterFrames(Math.max(groupSpan, fps * 0.31));
     // anticipation 不能吃掉超过一半入场进度，否则气泡直接以终态出现（零动画）
     const anticipation = Math.min(Math.round(fps * 0.19), Math.floor(enterFrames / 2));
-    const start = (item.startFrame ?? group.start) - anticipation;
+    // 重演时以当前周期起点为锚，把炸屏入场重新播一遍
+    const start = restageActive
+      ? restageBase
+      : (item.startFrame ?? group.start) - anticipation;
     const local = frame - start;
 
     const raw = Math.min(Math.max(local, 0) / enterFrames, 1);
     const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
-    // Hero 高潮时刻：2-3 个入场动画组合叠加，炸屏更猛
-    const heroCombo = pickHeroCombo(groupIndex);
+    // Hero 高潮时刻：2-3 个入场动画组合叠加，炸屏更猛。
+    // 重演时偏移种子，换一套 combo，避免看着像卡帧重播。
+    const heroCombo = pickHeroCombo(groupIndex + restageIndex * 3);
     const comboMotion = comboEnterMotion(heroCombo, raw, side);
 
-    // Hero 放大倍数：叠加场景缩放 + 安全区自适配缩放 + 常驻律动呼吸
-    const fitScale = Math.min(1, SAFE_WIDTH / CONTAINER_WIDTH);
-    const effectiveScale = 1.18 * group.sceneScale * fitScale * idle.scale;
+    // Hero 长驻时的二次脉冲：入场结束后随鼓点继续 pop。
+    // 锚点同样要跟随 restage 重置，否则重演时脉冲已在全幅状态。
+    const heroAccent = reAccentMotion(
+      frame,
+      restageActive ? restageBase : (item.startFrame ?? group.start),
+      beats,
+      fps,
+      groupIndex,
+    );
+    /**
+     * Hero 放大：静态基准 × sceneScale 归一 × 常驻律动 × 二次脉冲。
+     *
+     * heroAccent.scale 必须一起参与：它虽然只有 +1.4%，但 Hero 本就贴在
+     * 安全区边界上，这 1.4% 正是「超出边缘」的最后一脚。
+     */
+    const effectiveScale = clampStageScale(
+      HERO_BASE_SCALE * sceneScaleNorm(stageScale) * idle.scale * heroAccent.scale,
+    );
     const heroExitVariant = pickHeroExitVariant(groupIndex);
     // 退场窗口：不早于歌词唱完（endFrame），也不晚于 latestExitStart
     const heroBubbleEnd = item.endFrame ?? group.end;
@@ -435,15 +550,12 @@ const BubbleGroup: React.FC<{
       : 0;
     const exit = exitMotionVariant(heroExitVariant, heroExitRaw, side, CANVAS_WIDTH, CANVAS_HEIGHT, true);
 
-    // Hero 长驻时的二次脉冲：入场结束后随鼓点继续 pop
-    const heroAccent = reAccentMotion(frame, item.startFrame ?? group.start, beats, fps, groupIndex);
-
     const combinedOpacity = comboMotion.opacity * exit.opacity;
     const motionTransform = comboMotion.transform || '';
     const combinedTransform =
       `translate3d(${idle.x.toFixed(2)}px,${idle.y.toFixed(2)}px,0) ` +
       `${motionTransform} ` +
-      `scale(${(effectiveScale * heroAccent.scale).toFixed(4)}) ` +
+      `scale(${effectiveScale.toFixed(4)}) ` +
       `rotate(${heroAccent.rotate.toFixed(2)}deg) ` +
       `${exit.transform}`;
     const combinedFilter = [comboMotion.filter, exit.filter].filter(Boolean).join(' ') || undefined;
@@ -468,7 +580,15 @@ const BubbleGroup: React.FC<{
   }
 
   // ── 普通组：宽松段单条出场，密集段自动切成同波次并行出场 ────────────
-  const fitScale = Math.min(1, SAFE_WIDTH / CONTAINER_WIDTH);
+  /**
+   * 整组舞台缩放 = 静态基准 × sceneScale 归一 × 常驻律动。
+   *
+   * 逐气泡的 reAccent 脉冲不在这一层（加在每条气泡自己的 transform 上），
+   * 它的 +1.4% 已计入 STAGE_DYNAMIC_HEADROOM 的预留。
+   */
+  const stageFinalScale = clampStageScale(
+    NORMAL_BASE_SCALE * sceneScaleNorm(stageScale) * idle.scale,
+  );
   const baseAnticipation = Math.round(fps * 0.19);
   const maxAdvanceFrames = Math.round(MAX_INDIVIDUAL_ADVANCE_S * fps);
   const lastItem = group.items[group.items.length - 1];
@@ -483,7 +603,7 @@ const BubbleGroup: React.FC<{
         // 常驻律动叠加在整组舞台上：慢漂 + 呼吸缩放，长镜头也不会是静帧
         transform:
           `translate3d(${idle.x.toFixed(2)}px,${idle.y.toFixed(2)}px,0) ` +
-          `scale(${(group.sceneScale * fitScale * idle.scale).toFixed(4)})`,
+          `scale(${stageFinalScale.toFixed(4)})`,
         transformOrigin: 'center center',
         willChange: 'transform',
       }}
@@ -492,7 +612,7 @@ const BubbleGroup: React.FC<{
         const isDense = wave.items.length > 1;
         const waveEnterFrames = getWaveEnterFrames(wave, fps);
         const microStaggerFrames = getWaveMicroStaggerFrames(wave, fps);
-        const waveSeed = groupIndex * 17 + waveIndex * 11;
+        const waveSeed = groupIndex * 17 + waveIndex * 11 + restageIndex * 23;
         const sharedWaveVariants = pickWaveEnterVariants(waveSeed, genre, wave.items.length);
         // 密集波次提前量略减，优先歌词对齐；宽松单条可提前更多留呼吸。
         // 但绝不能超过入场时长的一半 —— 否则第 0 帧 enterRaw 就已经是 1，
@@ -505,18 +625,25 @@ const BubbleGroup: React.FC<{
           const side: 'left' | 'right' = item.role === 'right' ? 'right' : 'left';
           const seed = item.index * 7 + (item.subIndex || 0);
 
-          // 歌词对齐硬约束：每条气泡不能提前超过 MAX_INDIVIDUAL_ADVANCE_S
+          // 歌词对齐硬约束：每条气泡不能提前超过 MAX_INDIVIDUAL_ADVANCE_S。
+          // 重演时该约束不适用（气泡早已出场过，不存在「提前泄露未唱内容」问题），
+          // 改为以当前重演周期起点为锚，组内按微错峰依次重新点亮。
           const idealStart = wave.start - waveAnticipation + idx * microStaggerFrames;
           const hardFloor = (item.startFrame ?? wave.start) - maxAdvanceFrames;
-          const itemStart = Math.max(idealStart, hardFloor);
+          const itemStart = restageActive
+            ? restageBase + idx * Math.max(1, microStaggerFrames)
+            : Math.max(idealStart, hardFloor);
 
           const enterLocal = frame - itemStart;
           const enterRaw = clamp(enterLocal / waveEnterFrames, 0, 1);
-          const entered = enterLocal >= 0;
+          // 重演阶段整组都算已入场：这条气泡在首个周期就出现过了，
+          // 不能因为新锚点尚未到达而把它藏起来（会造成闪烁消失）。
+          const entered = restageActive || enterLocal >= 0;
 
-          // 多气泡同波次时共享一套主动画节奏，但每条轮换不同组合顺序，避免完全同动作复制
+          // 多气泡同波次时共享一套主动画节奏，但每条轮换不同组合顺序，避免完全同动作复制。
+          // 单条同样叠加 restageIndex 偏移，保证重演换一个变体。
           const perItemVariants = !isDense
-            ? [pickVariantForGenre(seed, genre)]
+            ? [pickVariantForGenre(seed + restageIndex * 29, genre)]
             : sharedWaveVariants
                 .map((_, offset) => sharedWaveVariants[(idx + offset) % sharedWaveVariants.length])
                 .slice(0, Math.min(sharedWaveVariants.length, wave.items.length >= 3 ? 3 : 2));
