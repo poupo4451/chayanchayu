@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@remotion-components/*": ["../cloud-run-remotion/src/remotion/*"]
+      "@remotion-components/*": ["../cloud-run-remotion/src/remotion/*"],
+      "@render-src/*": ["../cloud-run-remotion/src/*"]
     }
   },
   "include": ["src"]

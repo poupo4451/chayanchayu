@@ -58,10 +58,26 @@ export interface AlignReport {
   matchedLines: number;
   anchoredBubbles: number;
   totalBubbles: number;
+  /** 副歌重复而额外生成的「重演气泡」数量 */
+  repeatInstances?: number;
 }
 
 /** 气泡之间至少间隔多少帧，避免多个气泡同帧堆叠 */
 export const MIN_GAP_FRAMES = 5;
+/**
+ * 一条对话最多额外重演几次。
+ *
+ * generateLyrics 的 assembleLyrics 会让副歌行重复引用同一批 dialogueIndex，
+ * Suno 也确实把副歌唱了两遍。每一次演唱都应该有对应的气泡出场事件，
+ * 否则重复副歌那十几秒画面就是定格的。
+ */
+const MAX_REPEAT_INSTANCES = 2;
+/**
+ * 与上一次出场至少间隔这么久（秒）才值得重演。
+ * 低于这个间隔说明是相邻行的误配或紧挨着的 hook 复读，
+ * 再插一次入场只会显得抽搐。
+ */
+const REPEAT_MIN_GAP_S = 4;
 /** 模糊匹配判定为「同一行」的相似度阈值 */
 const MATCH_THRESHOLD = 0.55;
 /** 模糊匹配整体可信度阈值，低于此值降级为序号对齐 */
@@ -384,6 +400,39 @@ function subSpanFromChars(stream: TimedChar[], cs: CharSpan, b: BubbleData): Spa
   return { startS: stream[subStartIdx].s, endS: stream[subEndIdx].e };
 }
 
+/**
+ * 同一条对话在歌词里的一次出场。
+ *
+ * 【为什么必须是数组而不是单个 span】
+ * 副歌 hook 会被 generateLyrics 重复引用，同一个 dialogueIndex 在
+ * lyricsLineMap 里出现多次（不同 lineIndex）。旧实现把这些出场用
+ * min(startS) / max(endS) 塌成一个跨度，后果是：
+ *   - 气泡只锚在第一次出现的位置，副歌重复段一个入场事件都没有
+ *     → buildGroups 把那十几秒并进上一组的停留期 → 画面定格
+ *   - endS 取 max 让首次出场的 endFrame 被拉到第二遍唱完，
+ *     退场时机整体推迟十几秒
+ * 所以这里按演唱顺序保留每一次出场，交给下游决定重演。
+ */
+interface Occurrence {
+  startS: number;
+  endS: number;
+  /** 字级路径携带的字符流区间索引，用于子气泡精确切分 */
+  startIdx?: number;
+  endIdx?: number;
+}
+
+/** 按子气泡的 splitStart/splitEnd 从一次出场里切出实际时间跨度 */
+function sliceOccurrence(occ: Occurrence, b: BubbleData, stream: TimedChar[] | null): Span {
+  if (stream && occ.startIdx != null && occ.endIdx != null) {
+    return subSpanFromChars(
+      stream,
+      { startS: occ.startS, endS: occ.endS, startIdx: occ.startIdx, endIdx: occ.endIdx },
+      b,
+    );
+  }
+  return subSpan({ startS: occ.startS, endS: occ.endS }, b);
+}
+
 // ── 核心：气泡出现帧 ────────────────────────────────────────────────
 
 /**
@@ -658,13 +707,26 @@ export function computeBubbleTimings(params: {
     };
   }
 
-  // 对话条目的时间跨度；字级路径额外携带字符流区间索引（可选）
-  type DT = Span & { startIdx?: number; endIdx?: number };
-  const dialogueSpan = new Map<number, DT>();
+  // 每条对话的**所有**演唱出场（副歌重复会有多次）；
+  // 字级路径额外携带字符流区间索引（可选）。
+  const dialogueOccurrences = new Map<number, Occurrence[]>();
   let charStream: TimedChar[] | null = null;
   let strategy: AlignReport['strategy'] = 'uniform';
   let singable = 0;
   let matched = 0;
+
+  const pushOcc = (dialogueIndex: number, occ: Occurrence) => {
+    const list = dialogueOccurrences.get(dialogueIndex);
+    if (list) list.push(occ);
+    else dialogueOccurrences.set(dialogueIndex, [occ]);
+  };
+
+  // 按 lineIndex 升序遍历，保证 occurrence 数组顺序 == 演唱顺序。
+  // lineMap 本身是按行生成的，但显式排序更稳，也顺手滤掉段落标记行（-1）。
+  const orderedMap = (lineMap as LineMapEntry[])
+    .filter((m) => m && m.dialogueIndex >= 0)
+    .slice()
+    .sort((a, b) => a.lineIndex - b.lineIndex);
 
   // ── 字级对齐主策略（有词级时间戳时优先）────────────────────────────
   if (hasWords) {
@@ -672,49 +734,34 @@ export function computeBubbleTimings(params: {
     charStream = cr.stream.length > 0 ? cr.stream : null;
     singable = cr.singable;
     matched = cr.matched;
-    for (const m of lineMap as LineMapEntry[]) {
-      if (!m || m.dialogueIndex < 0) continue;
+    for (const m of orderedMap) {
       const cs = cr.map.get(m.lineIndex);
       if (!cs) continue;
-      const cur = dialogueSpan.get(m.dialogueIndex);
-      if (!cur) {
-        dialogueSpan.set(m.dialogueIndex, {
-          startS: cs.startS,
-          endS: cs.endS,
-          startIdx: cs.startIdx,
-          endIdx: cs.endIdx,
-        });
-      } else {
-        cur.startS = Math.min(cur.startS, cs.startS);
-        cur.endS = Math.max(cur.endS, cs.endS);
-        cur.startIdx = Math.min(cur.startIdx ?? cs.startIdx, cs.startIdx);
-        cur.endIdx = Math.max(cur.endIdx ?? cs.endIdx, cs.endIdx);
-      }
+      pushOcc(m.dialogueIndex, {
+        startS: cs.startS,
+        endS: cs.endS,
+        startIdx: cs.startIdx,
+        endIdx: cs.endIdx,
+      });
     }
-    strategy = dialogueSpan.size > 0 ? 'char' : 'uniform';
+    strategy = dialogueOccurrences.size > 0 ? 'char' : 'uniform';
   }
 
   // ── 降级：字级无锚点且有行级时间戳 → 回到行级模糊/序号对齐 ──────────
-  if (dialogueSpan.size === 0 && hasTimeline) {
+  if (dialogueOccurrences.size === 0 && hasTimeline) {
     const lr = buildTextLineTimeMap(lyrics as string, timeline as LyricLine[]);
     singable = lr.singable;
     matched = lr.matched;
     strategy = lr.strategy;
     charStream = null; // 行级路径无字符流
-    for (const m of lineMap as LineMapEntry[]) {
-      if (!m || m.dialogueIndex < 0) continue;
+    for (const m of orderedMap) {
       const span = lr.map.get(m.lineIndex);
       if (!span) continue;
-      const cur = dialogueSpan.get(m.dialogueIndex);
-      if (!cur) dialogueSpan.set(m.dialogueIndex, { ...span });
-      else {
-        cur.startS = Math.min(cur.startS, span.startS);
-        cur.endS = Math.max(cur.endS, span.endS);
-      }
+      pushOcc(m.dialogueIndex, { startS: span.startS, endS: span.endS });
     }
   }
 
-  if (dialogueSpan.size === 0) {
+  if (dialogueOccurrences.size === 0) {
     return {
       bubbles: uniformTimings(bubbles, totalFrames, fps),
       beats: beatsForStage(),
@@ -729,19 +776,12 @@ export function computeBubbleTimings(params: {
     };
   }
 
-  // 子气泡时间切分：有字符流区间时用字级，否则用比例
+  // 子气泡时间切分：只看**首次**出场，保持主管线（锚点/插值/单调化）语义不变。
+  // 副歌重复的第 2、3 次出场在第 5 步单独生成「重演气泡」。
   const getSubSpan = (b: BubbleData): Span | null => {
-    const dt = dialogueSpan.get(b.index);
-    if (!dt) return null;
-    if (charStream && dt.startIdx != null && dt.endIdx != null) {
-      return subSpanFromChars(charStream, {
-        startS: dt.startS,
-        endS: dt.endS,
-        startIdx: dt.startIdx,
-        endIdx: dt.endIdx,
-      }, b);
-    }
-    return subSpan(dt, b);
+    const occs = dialogueOccurrences.get(b.index);
+    if (!occs || occs.length === 0) return null;
+    return sliceOccurrence(occs[0], b, charStream);
   };
 
   // 1) 打锚点
@@ -841,8 +881,63 @@ export function computeBubbleTimings(params: {
     };
   });
 
+  // 5) 副歌重复 → 生成「重演气泡」。
+  //
+  //    generateLyrics 的副歌段会重复引用同一批 dialogueIndex，Suno 确实唱了两遍。
+  //    第 1~4 步只用了首次出场，第 2 次及以后的演唱区间在 startFrame 上没有任何
+  //    事件，buildGroups 会把那十几秒并进上一组的停留期 → 画面定格。
+  //    这里给每一次额外出场克隆一条气泡，让副歌重复时画面重新炸屏
+  //    （也正是 MV 处理 hook 复读的常规做法）。
+  const repeats: BubbleData[] = [];
+  for (const b of bubbles) {
+    const occs = dialogueOccurrences.get(b.index);
+    if (!occs || occs.length <= 1) continue;
+    let prevStartS = occs[0].startS;
+    let made = 0;
+    for (let k = 1; k < occs.length && made < MAX_REPEAT_INSTANCES; k += 1) {
+      const occ = occs[k];
+      // 间隔太近说明是相邻行误配或紧挨着的复读，再插入入场只会显得抽搐
+      if (occ.startS - prevStartS < REPEAT_MIN_GAP_S) continue;
+      const sub = sliceOccurrence(occ, b, charStream);
+      const startFrame = clampFrame(sub.startS * fps);
+      // 越界的重演不会被渲染，但会污染 group.end 计算，直接丢弃
+      if (startFrame >= lastAllowed) continue;
+      repeats.push({
+        ...b,
+        // uid 必须唯一：ChatMVComposition 用它做 React key
+        uid: `${b.uid ?? b.index}-r${k}`,
+        // 错开动画种子，让重演的入场/退场变体与首次不同，避免看着像卡帧重播
+        subIndex: (b.subIndex || 0) + k * 3,
+        startFrame,
+        endFrame: Math.max(startFrame + MIN_GAP_FRAMES, clampFrame(sub.endS * fps)),
+      });
+      prevStartS = occ.startS;
+      made += 1;
+    }
+  }
+
+  // 6) 合并重演气泡后重排，并重新建立「单调递增 + 最小间隔」不变量。
+  //    ChatMVComposition 的 buildGroups / buildWaves 都假设 bubbles 按
+  //    startFrame 升序，破坏这个前提会让分组逻辑错乱。
+  const merged =
+    repeats.length === 0
+      ? out
+      : [...out, ...repeats].sort((a, b) => (a.startFrame ?? 0) - (b.startFrame ?? 0));
+
+  if (repeats.length > 0) {
+    for (let i = 1; i < merged.length; i += 1) {
+      const prevStart = merged[i - 1].startFrame ?? 0;
+      if ((merged[i].startFrame ?? 0) < prevStart + MIN_GAP_FRAMES) {
+        merged[i].startFrame = prevStart + MIN_GAP_FRAMES;
+      }
+      if ((merged[i].endFrame ?? 0) <= (merged[i].startFrame ?? 0)) {
+        merged[i].endFrame = (merged[i].startFrame ?? 0) + MIN_GAP_FRAMES;
+      }
+    }
+  }
+
   return {
-    bubbles: out,
+    bubbles: merged,
     // 主路径同样不能返回空 beats：只有 lyricsWords 没有 timeline 时
     // beatsFromTimeline() 是空的，会让常驻律动层失去鼓点分量。
     // 逐级降级：真实行首 → 词级起始 → 合成节拍。
@@ -854,6 +949,7 @@ export function computeBubbleTimings(params: {
       matchedLines: matched,
       anchoredBubbles: anchoredCount,
       totalBubbles: bubbles.length,
+      repeatInstances: repeats.length,
     },
   };
 }

@@ -100,10 +100,14 @@ body {
   min-height: 0;
 }
 
-/* 手机外框：固定 9:16，高度撑满可用空间 */
+/**
+ * 画框：必须与 wxTheme 的 CANVAS_WIDTH/HEIGHT（720×960）一致 = 3:4。
+ * 之前写死 9/16，Player 会在 9:16 容器里对 3:4 内容做 letterbox 并进一步缩小，
+ * 导致在一个比例错误、尺寸偏小的窗口里判断构图和安全区。
+ */
 .phone {
   height: 100%;
-  aspect-ratio: 9 / 16;
+  aspect-ratio: 3 / 4;
   border-radius: 18px;
   overflow: hidden;
   background: #000;
@@ -150,6 +154,7 @@ body {
 
 /* 实际轨道（居中） */
 .progress-track {
+  position: relative; /* 供 .tick 绝对定位 */
   width: 100%;
   height: 4px;
   background: var(--border);
@@ -191,4 +196,85 @@ body {
 .hint code {
   font-family: 'SF Mono', 'Fira Code', monospace;
   color: var(--text2);
+}
+
+/* ── 真实 task 仿真档 ──────────────────────── */
+
+.mode-switch {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.real-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+}
+
+.real-row {
+  display: flex;
+  gap: 6px;
+}
+
+.task-input,
+.task-select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.task-select {
+  cursor: pointer;
+}
+
+.err {
+  color: #ff6b6b;
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.preset-desc .good { color: #4ade80; }
+.preset-desc .bad { color: #f87171; }
+
+.diag-toggle {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.diag-log {
+  max-height: 160px;
+  overflow: auto;
+  margin: 4px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0d0d12;
+  color: #9ca3af;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* 进度条上的气泡入场事件刻度：一眼看出长空档在哪 */
+.tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
 }

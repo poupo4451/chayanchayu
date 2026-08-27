@@ -3,12 +3,19 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 const REMOTION_SRC = path.resolve(__dirname, '../cloud-run-remotion/src/remotion');
+/**
+ * 主工程 src/ 根目录。用于 import buildRenderInputs / lyricsAlign ——
+ * 预览必须调用与云端**完全相同**的输入构建函数，否则会重新出现
+ * 「预览调好、上云观感不同」的漂移问题。
+ */
+const RENDER_SRC = path.resolve(__dirname, '../cloud-run-remotion/src');
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: [
       { find: '@remotion-components', replacement: REMOTION_SRC },
+      { find: '@render-src', replacement: RENDER_SRC },
       /**
        * remotion/no-react.js 的 CJS shim 在 ESM 环境下没有 named export。
        * 必须放在 'remotion' 前面，否则前缀匹配的 remotion alias 会先命中。

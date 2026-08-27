@@ -6,7 +6,8 @@ import { bundle } from '@remotion/bundler';
 import { selectComposition, renderMedia } from '@remotion/renderer';
 import * as tcb from '@cloudbase/node-sdk';
 import { BubbleData } from './remotion/ChatBubble';
-import { computeBubbleTimings, LineMapEntry, LyricLine, LyricWord, MIN_GAP_FRAMES } from './lyricsAlign';
+import { LineMapEntry, LyricLine, LyricWord } from './lyricsAlign';
+import { buildRenderInputs, RENDER_FPS } from './buildRenderInputs';
 
 // 渲染服务必须与小程序、云函数和 Cloud Run 部署目标使用同一个环境。
 const ENV_ID = 'cloud1-d7ggdqfhgc4ee2796';
@@ -150,7 +151,7 @@ async function setStage(taskId: string, stage: string, progress?: number): Promi
   }
 }
 
-const RENDER_FPS = 30;
+// RENDER_FPS 由 buildRenderInputs 导出，两边共用同一常量避免帧率漂移
 
 export async function debugRenderSteps(taskId: string): Promise<Record<string, unknown>> {
   const steps: Record<string, unknown> = {};
@@ -245,6 +246,54 @@ export async function getTaskVideoUrl(taskId: string): Promise<{ fileId: string;
 }
 
 /**
+ * 导出一条 task 的「预览夹具」：dev-preview 用它在浏览器里复现真实渲染输入。
+ *
+ * 【为什么返回原始数据而不是算好的 inputProps】
+ * 预览的目的就是调试 buildRenderInputs / lyricsAlign / ChatMVComposition 本身。
+ * 如果这里直接返回云端算好的 inputProps，预览就测不到本地代码改动了。
+ * 所以只做浏览器做不到的事（读库、解析 cloud:// 换临时 URL、校验头像素材），
+ * 时间轴计算留给 dev-preview 本地跑同一个 buildRenderInputs。
+ */
+export async function getTaskFixture(taskId: string): Promise<Record<string, unknown> | null> {
+  const taskRes = await db.collection('tasks').doc(taskId).get();
+  const raw = taskRes.data;
+  const task = (Array.isArray(raw) ? raw[0] : raw) as TaskData | undefined;
+  if (!task) return null;
+
+  const bubbles: BubbleData[] = task.screenshots || [];
+  // 贴纸 cloud:// → 临时 URL；头像按 public/avatars 实际存在情况校正。
+  // dev-preview 的 publicDir 指向同一个目录，所以校正结果一致。
+  await resolveStickerUrls(bubbles);
+  resolveAvatars(bubbles);
+
+  // 音频：浏览器只能播 http(s)，cloud:// 必须换成签名临时链接
+  let audioUrl = task.audioUrl || '';
+  if (audioUrl.startsWith('cloud://')) {
+    try {
+      const r = await app.getTempFileURL({ fileList: [audioUrl] });
+      const list = (r as { fileList: Array<{ tempFileURL: string }> }).fileList;
+      audioUrl = list[0]?.tempFileURL || '';
+    } catch (e) {
+      console.warn('fixture: audio temp url failed:', e instanceof Error ? e.message : String(e));
+      audioUrl = '';
+    }
+  }
+
+  return {
+    taskId,
+    topic: task.topic || '',
+    screenshots: bubbles,
+    audioUrl,
+    audioDuration: task.audioDuration || 30,
+    lyrics: task.lyrics || '',
+    lyricsLineMap: task.lyricsLineMap || [],
+    lyricsTimeline: task.lyricsTimeline || [],
+    lyricsWords: task.lyricsWords || [],
+    style: task.style || {},
+  };
+}
+
+/**
  * 用 ffprobe 获取音频文件的实际时长（秒）。
  * 应对 Suno API 上报的 duration 可能不准确的问题：
  *   - 实际音频比上报的更长 → 气泡动画提前结束
@@ -273,102 +322,6 @@ async function getActualAudioDuration(audioPath: string): Promise<number | null>
   } catch {
     return null;
   }
-}
-
-/**
- * 逐级降级获取第一句歌词的起唱时间（秒）。
- * 🥇 lyricsTimeline 中第一条 startS > 0 且有实际歌词文本的行 — Suno 行级时间戳
- *    （跳过 [Intro]/[Instrumental]/空行等前奏标记行）
- * 🥈 lyricsWords[0].s — Suno 词级时间戳
- * 🥉 第一个气泡 startFrame 反推 — 仅当气泡时间来自真实对齐时可用
- * 返回 null 表示没有可用的起唱时间数据。
- *
- * @param allowBubbleInference uniform 降级时必须传 false。
- *   均匀分配的气泡帧号是「编排」出来的（含人造的 intro 留白），
- *   不代表任何真实演唱时刻；拿它反推前奏会把开头的人声当前奏裁掉。
- */
-function getFirstLyricStartSeconds(
-  timeline?: LyricLine[],
-  words?: LyricWord[],
-  bubblesTimed?: BubbleData[],
-  allowBubbleInference = true,
-): number | null {
-  if (timeline && timeline.length > 0) {
-    // 跳过前奏标记行（startS 为 0 或文本为空），找第一条真正起唱的行
-    for (const line of timeline) {
-      if (typeof line.startS === 'number' && line.startS > 0 && line.text.trim().length > 0) {
-        console.log(`🎵 getFirstLyricStartSeconds: found in timeline[${line.lineIndex}] "${line.text}" at ${line.startS}s`);
-        return line.startS;
-      }
-    }
-    console.log(`🎵 getFirstLyricStartSeconds: timeline has ${timeline.length} lines, none with startS>0 and text`);
-  }
-  if (words && words.length > 0 && typeof words[0].s === 'number' && words[0].s > 0) {
-    console.log(`🎵 getFirstLyricStartSeconds: found in words[0] "${words[0].w}" at ${words[0].s}s`);
-    return words[0].s;
-  }
-  if (!allowBubbleInference) {
-    console.log('🎵 getFirstLyricStartSeconds: uniform strategy → skip bubble inference (frames are synthetic)');
-    return null;
-  }
-  if (bubblesTimed && bubblesTimed.length > 0 && typeof bubblesTimed[0].startFrame === 'number' && bubblesTimed[0].startFrame > 0) {
-    const secs = bubblesTimed[0].startFrame / RENDER_FPS;
-    console.log(`🎵 getFirstLyricStartSeconds: fallback to bubble[0].startFrame/${RENDER_FPS} = ${secs.toFixed(1)}s`);
-    return secs;
-  }
-  // 🏅 策略4：即使气泡无 timeline 均匀分布，从气泡间距也能推测前奏
-  // 当多条气泡且第一条与第二条间隔 > 2 秒时，可能有纯音乐前奏
-  if (bubblesTimed && bubblesTimed.length >= 2) {
-    const f1 = bubblesTimed[0].startFrame ?? 0;
-    const f2 = bubblesTimed[1].startFrame ?? 0;
-    if (f2 > f1 + RENDER_FPS * 2) {
-      const secs = f1 / RENDER_FPS;
-      console.log(`🎵 getFirstLyricStartSeconds: inferred from bubble[0]=${f1}f bubble[1]=${f2}f gap > 2s, returning ${secs.toFixed(1)}s`);
-      return secs;
-    }
-  }
-  console.log('🎵 getFirstLyricStartSeconds: no usable data, returning null');
-  return null;
-}
-
-/**
- * 从 timeline 获取最后一句歌词的结束时间（秒）。
- * 遍历所有行取最大 endS，跳过前奏/空行。
- */
-function getLastLyricEndSeconds(timeline?: LyricLine[]): number | null {
-  if (!timeline || timeline.length === 0) return null;
-  let maxEnd = 0;
-  for (const line of timeline) {
-    if (typeof line.endS === 'number' && line.endS > maxEnd && line.text.trim().length > 0) {
-      maxEnd = line.endS;
-    }
-  }
-  if (maxEnd > 0) {
-    console.log(`🎵 getLastLyricEndSeconds: max endS = ${maxEnd}s`);
-    return maxEnd;
-  }
-  console.log('🎵 getLastLyricEndSeconds: no valid endS found in timeline');
-  return null;
-}
-
-/**
- * 最后一个气泡「入场动画播完」的时间（秒）。
- * ChatMVComposition：start = startFrame - anticipation(0.5s)，
- * 入场时长最长 ENTER_FRAMES.maxFrames = 22 帧，
- * 故动画结束 ≈ startFrame + (22-15) 帧 ≈ startFrame + 0.25s，取 0.3s 兜底。
- * 注意最后一组的 group.end = totalFrames + TAIL_MARGIN，退场动画不会播，
- * 这里只考虑入场。
- */
-function getLastBubbleAnimEndSeconds(bubbles: BubbleData[]): number | null {
-  let maxFrame = 0;
-  for (const b of bubbles) {
-    const f = b.startFrame ?? 0;
-    if (f > maxFrame) maxFrame = f;
-  }
-  if (maxFrame <= 0) return null;
-  const secs = maxFrame / RENDER_FPS + 0.3;
-  console.log(`🎵 getLastBubbleAnimEndSeconds: ${secs.toFixed(1)}s`);
-  return secs;
 }
 
 export async function renderTask(taskId: string): Promise<void> {
@@ -419,142 +372,6 @@ export async function renderTask(taskId: string): Promise<void> {
     resolveAvatars(bubbles);
     await setStage(taskId, 'stickers_resolved');
 
-    // 用歌词时间戳对齐气泡出现时间。
-    // 注意 lyricsLineMap.lineIndex（歌词文本行号，含 [Verse]/空行）与
-    // lyricsTimeline.lineIndex（实际演唱行序号）不是同一套坐标系，
-    // 必须经 lyricsAlign 做文本模糊对齐，否则气泡会整体错位若干句。
-    const totalFrames = Math.ceil(audioDuration * RENDER_FPS);
-    const timed = computeBubbleTimings({
-      bubbles,
-      lineMap: task.lyricsLineMap,
-      timeline: task.lyricsTimeline,
-      lyrics: task.lyrics,
-      lyricsWords: task.lyricsWords,
-      totalFrames,
-      fps: RENDER_FPS,
-    });
-    const bubblesTimed = timed.bubbles;
-    console.log('lyrics alignment:', JSON.stringify(timed.report));
-
-    // ── 🎵 音频时间窗计算：裁前奏 + 掐尾巴 ──────────────────────────
-    // 只算出 [introTrimS, tailCutoffS) 这个窗口，不碰音频文件本身，
-    // 由 <Audio trimBefore> + composition durationInFrames 落地。
-    const INTRO_TRIM_THRESHOLD = 1.0;
-    const INTRO_LEAD_IN = 0.3;
-    const INTRO_FADE_IN_S = 0.3;     // 裁前奏后的淡入（落在 lead-in 内，不碰人声）
-    const TAIL_HOLD_S = 0.3;         // 唱完后原音量定格 0.3 秒
-    const TAIL_FADE_DURATION = 2.0;
-    const TAIL_BUFFER = TAIL_HOLD_S + TAIL_FADE_DURATION; // 2.3s
-    const TAIL_MIN_SAVED = 0.3;
-
-    const originalDuration = audioDuration;
-
-    console.log(
-      `🎵 diagnostics: timeline=${task.lyricsTimeline?.length ?? 0} lines, ` +
-      `words=${task.lyricsWords?.length ?? 0}, bubbles=${bubblesTimed.length}, ` +
-      `audioDuration=${originalDuration.toFixed(1)}s, totalFrames=${totalFrames}`,
-    );
-    if (task.lyricsTimeline?.length) {
-      console.log('🎵 diagnostics: head =',
-        task.lyricsTimeline.slice(0, 2).map((l) => `[${l.lineIndex}]"${l.text}" ${l.startS}~${l.endS}`));
-      console.log('🎵 diagnostics: tail =',
-        task.lyricsTimeline.slice(-2).map((l) => `[${l.lineIndex}]"${l.text}" ${l.startS}~${l.endS}`));
-    }
-
-    // uniform 降级时气泡帧号是「编排」出来的，不代表真实演唱时刻，
-    // 不能用它反推前奏/尾奏，否则会把开头人声当前奏裁掉、或提前掐断结尾。
-    const isUniform = timed.report.strategy === 'uniform';
-
-    // 1) 前奏起点
-    let introTrimS = 0;
-    const firstLyricStartS = getFirstLyricStartSeconds(
-      task.lyricsTimeline,
-      task.lyricsWords,
-      bubblesTimed,
-      !isUniform,
-    );
-    if (firstLyricStartS != null && firstLyricStartS >= INTRO_TRIM_THRESHOLD) {
-      introTrimS = Math.max(0, firstLyricStartS - INTRO_LEAD_IN);
-    } else {
-      console.log(
-        `🎵 intro trim skipped: firstLyricStart=${firstLyricStartS ?? 'null'} ` +
-        `(threshold ${INTRO_TRIM_THRESHOLD}s)`,
-      );
-    }
-
-    // 2) 尾巴终点：淡出锚点 = max(最后一句唱完, 最后气泡入场动画播完)
-    //    只取气泡会切断最后那句歌词，只取歌词在无 timeline 时拿不到值，必须取 max。
-    let tailCutoffS = originalDuration;
-    const lyricEndS = getLastLyricEndSeconds(task.lyricsTimeline);
-    // uniform 下气泡尾帧是编排值（含人造 outro 留白），不能作为掐尾依据
-    const bubbleAnimEndS = isUniform ? null : getLastBubbleAnimEndSeconds(bubblesTimed);
-    const animEndS = lyricEndS != null && bubbleAnimEndS != null
-      ? Math.max(lyricEndS, bubbleAnimEndS)
-      : (lyricEndS ?? bubbleAnimEndS);
-
-    if (animEndS != null) {
-      const cut = Math.min(originalDuration, animEndS + TAIL_BUFFER);
-      if (cut < originalDuration - TAIL_MIN_SAVED && cut > introTrimS + 2) {
-        tailCutoffS = cut;
-        console.log(
-          `🎵 tail trim: lyricEnd=${lyricEndS?.toFixed(1) ?? 'null'}s, ` +
-          `bubbleAnimEnd=${bubbleAnimEndS?.toFixed(1) ?? 'null'}s → ` +
-          `animEnd=${animEndS.toFixed(1)}s, cut=${cut.toFixed(1)}s ` +
-          `(saved ${(originalDuration - cut).toFixed(1)}s, hold ${TAIL_HOLD_S}s + fade ${TAIL_FADE_DURATION}s)`,
-        );
-      } else {
-        console.log(
-          `🎵 tail trim skipped: cut=${cut.toFixed(1)}s vs ` +
-          `duration=${originalDuration.toFixed(1)}s (saved=${(originalDuration - cut).toFixed(1)}s, min=${TAIL_MIN_SAVED}s)`,
-        );
-      }
-    } else {
-      console.log('🎵 tail trim skipped: no animation end data');
-    }
-
-    // 3) 落地成帧
-    const frameOffset = Math.round(introTrimS * RENDER_FPS);
-    audioDuration = Math.max(1, tailCutoffS - introTrimS);
-    const finalFrames = Math.ceil(audioDuration * RENDER_FPS);
-
-    if (frameOffset > 0) {
-      // ⚠️ 旧实现用 Math.max(0, shifted) 压平：所有 startFrame < frameOffset 的
-      // 气泡全被压到 0，单调递增和最小间隔同时失效，首组多条气泡同帧堆叠且
-      // 因为 anticipation 已经跑完而完全没有入场动画。这里改为保序推开。
-      let prev = -Infinity;
-      for (const b of bubblesTimed) {
-        const shifted = (b.startFrame ?? 0) - frameOffset;
-        b.startFrame = Math.max(shifted, prev + MIN_GAP_FRAMES, 0);
-        prev = b.startFrame;
-        b.endFrame = Math.min(
-          finalFrames,
-          Math.max(b.startFrame + 1, (b.endFrame ?? 0) - frameOffset),
-        );
-      }
-      // beats 必须 filter 掉负值，不能 clamp 成 0，否则开头会堆一坨节拍
-      timed.beats = (timed.beats || [])
-        .map((f) => f - frameOffset)
-        .filter((f) => f >= 0);
-    }
-    timed.beats = (timed.beats || []).filter((f) => f <= finalFrames);
-
-    const audioTrimBefore = frameOffset;
-    // 淡入只在真的裁了前奏时才需要（消硬切爆音）；从 0 开始播的原始音频不需要
-    const audioFadeInFrames = introTrimS > 0
-      ? Math.min(Math.round(INTRO_FADE_IN_S * RENDER_FPS), Math.floor(finalFrames / 4))
-      : 0;
-    const audioFadeOutFrames = tailCutoffS < originalDuration - 0.01
-      ? Math.min(Math.round(TAIL_FADE_DURATION * RENDER_FPS), Math.floor(finalFrames / 2))
-      : 0;
-
-    console.log(
-      `🎵 audio window: [${introTrimS.toFixed(1)}s → ${tailCutoffS.toFixed(1)}s] ` +
-      `of ${originalDuration.toFixed(1)}s | duration=${audioDuration.toFixed(1)}s ` +
-      `frames=${finalFrames} trimBefore=${audioTrimBefore}f ` +
-      `fadeIn=${audioFadeInFrames}f fadeOut=${audioFadeOutFrames}f ` +
-      `| firstBubble=${bubblesTimed[0]?.startFrame} beats=${timed.beats.length}`,
-    );
-
     // ── 音频：始终把 URL 直接交给 Remotion，绝不传容器本地路径 ──────────
     // Remotion 只能加载 http(s) URL 或 public/ 下的文件（staticFile），
     // /tmp/xxx.mp3 会被解析成 bundle 根目录的相对路径而 404。
@@ -564,23 +381,32 @@ export async function renderTask(taskId: string): Promise<void> {
     }
     await setStage(taskId, 'audio_ready');
 
+    // ── 构建渲染输入 ────────────────────────────────────────────────
+    // 对齐 → 裁前奏 → 掐尾巴 → 平移帧号 → 组装 inputProps 全部收敛在
+    // buildRenderInputs 里，dev-preview 调用同一个函数，保证预览与成片一致。
+    const built = buildRenderInputs({
+      task,
+      bubbles,
+      audioDuration,
+      audioPath: audioPath || '',
+      fps: RENDER_FPS,
+      log: (msg) => console.log(msg),
+    });
+    const { inputProps } = built;
+    const bubblesTimed = inputProps.bubbles;
+
+    // 诊断落库：服务 MinNum=0 会缩容，容器 stdout 很难事后捞取。
+    // maxStaticGapS = 相邻气泡入场事件的最大间隔，即「最长多久没有动画」。
+    try {
+      await db.collection('tasks').doc(taskId).update({ renderAlignReport: built.report });
+    } catch {
+      // 诊断写入失败不影响渲染主流程
+    }
+
     await setStage(taskId, 'bundling');
     const serveUrl = await getBundleLocation();
     await setStage(taskId, 'bundled');
     console.log('bundle location:', serveUrl);
-
-    const inputProps = {
-      bubbles: bubblesTimed,
-      audioPath: audioPath || '',
-      audioDuration,
-      audioTrimBefore,
-      audioFadeInFrames,
-      audioFadeOutFrames,
-      // 每句歌词的起唱帧，供画面做节奏律动
-      beats: timed.beats,
-      // 流派用于挑选气泡入场动画池（嘻哈更 punchy，抒情类更柔和）
-      genre: (task.style && task.style.musicGenre) || '',
-    };
 
     const composition = await selectComposition({
       serveUrl,
