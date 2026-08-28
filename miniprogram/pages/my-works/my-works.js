@@ -1,14 +1,15 @@
 const { getWorksList, deleteWork, getUserProfile, updateUserProfile } = require('../../utils/api');
 const { showError } = require('../../utils/error-tip');
+const { startCreateFlow } = require('../../utils/create-entry');
 
 const STAGE_LABELS = {
   pending: '排队中',
   generating_dialogue: '编写剧本中',
   generating_screenshots: '渲染聊天气泡中',
   generating_lyrics: '改编歌词中',
-  generating_music: '生成音乐中',
+  generating_music: '创作音乐中',
   rendering_video: '合成MV中',
-  failed: '生成失败',
+  failed: '创作失败',
 };
 
 /**
@@ -551,15 +552,12 @@ Page({
     wx.showToast({ title: '客服暂时不可用，请稍后再试', icon: 'none' });
   },
 
-  /** 空状态 CTA：本页是 tab 页，创作页是普通页，用 navigateTo 保留返回路径 */
+  /**
+   * 空状态 CTA：本页是 tab 页，创作页是普通页，用 navigateTo 保留返回路径。
+   * 具体跳输入页还是走审核旁路由 create-entry 统一决定（与首页同一条链路）。
+   */
   goCreate() {
-    wx.navigateTo({
-      url: '/pages/create/create',
-      fail: (err) => {
-        console.error('open create failed', err);
-        wx.showToast({ title: '打开创作页失败', icon: 'none' });
-      },
-    });
+    startCreateFlow();
   },
 
   onShareAppMessage() {

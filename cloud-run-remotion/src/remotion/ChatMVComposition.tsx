@@ -1,6 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, Audio, useCurrentFrame, useVideoConfig } from 'remotion';
 import { ChatBubble, BubbleData } from './ChatBubble';
+import { BrandEnding } from './BrandEnding';
 import { CANVAS_HEIGHT, FONT_FAMILY, WX_COLOR, CONTAINER_WIDTH } from './wxTheme';
 import {
   beatEnergy,
@@ -25,6 +26,7 @@ import {
   STAGE_DYNAMIC_HEADROOM,
   NORMAL_PEAK_WIDTH_RATIO,
   HERO_PEAK_WIDTH_RATIO,
+  BRAND,
 } from './animation-config';
 
 /**
@@ -128,12 +130,6 @@ const HERO_MAX_RATIO = 0.35;
 const MAX_MERGE_ITEMS = 3;
 /** 节奏兜底：每多少个非 Hero 组强制把末条抽成独立 Hero */
 const FORCE_HERO_EVERY = 3;
-/**
- * 尾帧安全边距（秒）：最后一组气泡的结束帧延长这么多，
- * 防止音频实际时长超过 Suno 上报值时动画被切断。
- * 这个延长仅在 Remotion 合成内部生效，不会拖长最终视频（视频时长由 composition 决定）。
- */
-const TAIL_MARGIN_S = 2.0;
 /** 触发并行波次的密集阈值（秒）：相邻歌词间隔小于此值，允许同波次出场 */
 const WAVE_DENSE_GAP_S = 0.42;
 /** 单个波次允许覆盖的最大歌词跨度（秒），避免未来内容提前太多 */
@@ -354,7 +350,11 @@ function composeWaveEnterMotion(
  * 节奏兜底：若全曲 Hero 占比过低（< HERO_MIN_RATIO），按固定间隔把某些多气泡组
  * 的最后一条「抽」成独立 Hero 组，保证快闪高光时刻按节奏出现，不完全依赖歌词疏密。
  */
-function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): Group[] {
+/**
+ * @param contentEndFrames 内容段结束帧。气泡动画只存在于 [0, contentEndFrames)，
+ *   最后一组必须在此帧之前把退场动画完整播完；其后的片尾段由 BrandEnding 接管。
+ */
+function buildGroups(bubbles: BubbleData[], fps: number, contentEndFrames: number): Group[] {
   if (bubbles.length === 0) return [];
 
   const maxSpan = GROUP_MAX_SPAN_S * fps;
@@ -368,7 +368,7 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
     groups.push({
       items: cur,
       start: cur[0].startFrame ?? 0,
-      end: totalFrames,
+      end: contentEndFrames,
       hero: cur.length === 1,
       sceneScale: 0, // 兜底，结尾统一赋值
     });
@@ -425,14 +425,14 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
         out.push({
           items: main,
           start: main[0].startFrame ?? g.start,
-          end: totalFrames,
+          end: contentEndFrames,
           hero: false,
           sceneScale: 0, // 兜底，结尾统一赋值
         });
         out.push({
           items: [last],
           start: last.startFrame ?? g.start,
-          end: totalFrames,
+          end: contentEndFrames,
           hero: true,
           sceneScale: 0, // 兜底，结尾统一赋值
         });
@@ -446,11 +446,14 @@ function buildGroups(bubbles: BubbleData[], fps: number, totalFrames: number): G
     groups.push(...out);
   }
 
-  // 每组一直留到下一组进场为止；
-  // 最后一组延长 TAIL_MARGIN_S，防止音频实际时长超出预期时动画被截断。
-  const tailFrames = Math.round(TAIL_MARGIN_S * fps);
+  // 每组一直留到下一组进场为止；最后一组在内容段末尾收尾，完整播完退场。
+  //
+  // 【为什么不能再给最后一组追加余量】旧实现用 TAIL_MARGIN_S 把最后一组的
+  // group.end 推到视频总时长之外，退场起点（group.end - exitFrames）随之被
+  // 推出画面，最后一组一帧退场都播不到，画面直接定格到结束。
+  // 现在「音频实际超长」的缓冲由片尾段承担，气泡必须在 contentEndFrames 前消失完。
   for (let i = 0; i < groups.length; i += 1) {
-    groups[i].end = i + 1 < groups.length ? groups[i + 1].start : totalFrames + tailFrames;
+    groups[i].end = i + 1 < groups.length ? groups[i + 1].start : contentEndFrames;
     groups[i].sceneScale = computeSceneScale(i);
   }
   return groups;
@@ -723,6 +726,14 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
 
+  /** 品牌尾帧帧数：视频尾部 tailS 秒是片尾段，只展示 logo + slogan */
+  const brandTailFrames = Math.round(BRAND.tailS * fps);
+  /**
+   * 内容段结束帧：气泡动画只存在于 [0, contentEndFrames)，
+   * 其后 [contentEndFrames, durationInFrames) 由 BrandEnding 接管。
+   */
+  const contentEndFrames = Math.max(1, durationInFrames - brandTailFrames);
+
   const audioVolume = React.useCallback(
     (f: number) => {
       let v = 1;
@@ -730,12 +741,15 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({
         v *= equalPower(f / audioFadeInFrames);
       }
       if (audioFadeOutFrames > 0) {
-        const last = durationInFrames - 1;
+        // ⚠️ 锚点必须是内容段结束帧，不能用 durationInFrames：
+        // 视频尾部已被片尾段拉长 tailS 秒，若按总时长算淡出，
+        // 音频在内容段最后一帧音量仍有 ≈0.98 就被硬切，尾音会爆。
+        const last = contentEndFrames - 1;
         v *= equalPower((last - f) / audioFadeOutFrames);
       }
       return v;
     },
-    [audioFadeInFrames, audioFadeOutFrames, durationInFrames],
+    [audioFadeInFrames, audioFadeOutFrames, contentEndFrames],
   );
 
   const beatFrames = React.useMemo(() => (beats || []).slice().sort((a, b) => a - b), [beats]);
@@ -748,7 +762,8 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({
     const mapped = list.map((b, i) => {
       let sf = b.startFrame;
       if (sf == null) {
-        sf = Math.round((durationInFrames * i) / Math.max(list.length, 1));
+        // 按内容段均分，片尾段不排气泡
+        sf = Math.round((contentEndFrames * i) / Math.max(list.length, 1));
       }
       if (sf < last) sf = last;
       last = sf;
@@ -757,14 +772,14 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({
 
     // 剔除越界气泡：它们自己永远不会被渲染，但会作为「下一组」把上一个可见组的
     // group.end 推到视频时长之外，导致那一组的退场永远等不到 → 尾段静止定格。
-    const cutoff = Math.max(durationInFrames - Math.round(fps * 0.2), 1);
+    const cutoff = Math.max(contentEndFrames - Math.round(fps * 0.2), 1);
     const visible = mapped.filter((b) => (b.startFrame ?? 0) < cutoff);
     return visible.length > 0 ? visible : mapped.slice(0, 1);
-  }, [bubbles, durationInFrames, fps]);
+  }, [bubbles, contentEndFrames, fps]);
 
   const groups = React.useMemo(
-    () => buildGroups(items, fps, durationInFrames),
-    [items, fps, durationInFrames],
+    () => buildGroups(items, fps, contentEndFrames),
+    [items, fps, contentEndFrames],
   );
 
   // 当前组 + 正在退场的上一组
@@ -777,9 +792,13 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({
     return idx;
   }, [groups, frame]);
 
-  const rendered = groups
-    .map((g, i) => ({ g, i }))
-    .filter(({ g, i }) => i === activeIdx || (i === activeIdx - 1 && frame < g.end));
+  // 片尾段不渲染任何气泡组：最后一组的退场已在 contentEndFrames 播完，
+  // 这里直接清空，杜绝残留气泡压在片尾图上。
+  const rendered = frame >= contentEndFrames
+    ? []
+    : groups
+      .map((g, i) => ({ g, i }))
+      .filter(({ g, i }) => i === activeIdx || (i === activeIdx - 1 && frame < g.end));
 
   return (
     <AbsoluteFill style={{ backgroundColor: WX_COLOR.canvas, fontFamily: FONT_FAMILY, overflow: 'hidden' }}>
@@ -809,6 +828,9 @@ export const ChatMVComposition: React.FC<ChatMVProps> = ({
           <BubbleGroup key={i} groupIndex={i} group={g} frame={frame} fps={fps} beats={beatFrames} genre={genre} />
         ))}
       </AbsoluteFill>
+
+      {/* 品牌片尾：气泡全部退场后居中渐现 logo + slogan，保持到视频结束 */}
+      <BrandEnding startFrame={contentEndFrames} tailFrames={brandTailFrames} />
 
       {/* 安全区留白：保证气泡组不会贴边（720×1280 竖屏） */}
       <AbsoluteFill

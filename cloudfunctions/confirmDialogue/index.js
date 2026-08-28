@@ -44,7 +44,7 @@ exports.main = async (event) => {
         return {
           success: false,
           code: 'QUOTA_EXCEEDED',
-          message: `今日生成次数已用完（每天 ${q.limit} 次），明天 0 点恢复`,
+          message: `今日创作次数已用完（每天 ${q.limit} 次），明天 0 点恢复`,
           data: { limit: q.limit, remain: 0 },
         };
       }

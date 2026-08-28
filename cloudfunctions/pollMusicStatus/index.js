@@ -667,16 +667,16 @@ async function processTask(task, options = {}) {
 
   if (FAILED_STATUS.has(providerStatus)) {
     const FAILED_MSG = {
-      SENSITIVE_WORD_ERROR: '歌词包含敏感词，Suno拒绝生成，请调整对话内容后重试',
+      SENSITIVE_WORD_ERROR: '歌词包含敏感词，Suno拒绝创作，请调整对话内容后重试',
       CREATE_TASK_FAILED: 'Suno创建音乐任务失败',
-      GENERATE_AUDIO_FAILED: 'Suno生成音乐曲目失败',
+      GENERATE_AUDIO_FAILED: 'Suno制作音乐曲目失败',
       CALLBACK_EXCEPTION: 'Suno回调处理异常',
     };
     await tasksCol.doc(taskId).update({
       data: {
         status: 'failed',
         errorStage: 'generating_music',
-        errorMsg: record.errorMessage || record.errorMsg || FAILED_MSG[providerStatus] || 'Suno音乐生成失败',
+        errorMsg: record.errorMessage || record.errorMsg || FAILED_MSG[providerStatus] || 'Suno音乐制作失败',
         musicProviderStatus: providerStatus,
         lastMusicPollAt: Date.now(),
         updatedAt: Date.now(),

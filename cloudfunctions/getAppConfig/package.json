@@ -1,0 +1,9 @@
+{
+  "name": "getAppConfig",
+  "version": "1.0.0",
+  "description": "读取运行期开关与创作预设（审核期跳过自由输入的主题页）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

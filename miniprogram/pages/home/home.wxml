@@ -72,7 +72,7 @@
 
     <image class="create-icon" src="/images/create-voice-icon.svg" mode="aspectFit" />
     <text class="create-title">创作对话歌词动画</text>
-    <text class="create-sub">输入一个主题，自动生成对话与配乐</text>
+    <text class="create-sub">{{createSub}}</text>
   </view>
 
   <!-- 占位卡片：仅作预告，不可点击（无 bindtap，且 pointer-events 关闭） -->

@@ -281,7 +281,7 @@ exports.main = async (event) => {
       if (isRateLimitError(lastError)) {
         throw new Error('AI服务当前繁忙（并发受限），请稍后重试');
       }
-      throw new Error((lastError && lastError.message) || 'AI对话生成解析失败，请重试');
+      throw new Error((lastError && lastError.message) || 'AI对话创作解析失败，请重试');
     }
 
     // 为每个说话人稳定分配默认头像标识（如 male-2），全程保持一致
@@ -307,10 +307,10 @@ exports.main = async (event) => {
       data: {
         status: 'failed',
         errorStage: 'generating_dialogue',
-        errorMsg: e.message || '对话生成失败',
+        errorMsg: e.message || '对话创作失败',
         updatedAt: Date.now(),
       },
     });
-    return { success: false, message: e.message || '对话生成失败' };
+    return { success: false, message: e.message || '对话创作失败' };
   }
 };

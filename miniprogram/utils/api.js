@@ -108,6 +108,14 @@ function getDailyQuota() {
   return callFunction('getDailyQuota', {});
 }
 
+/**
+ * 读取运行期开关与创作预设。
+ * 审核期用于跳过「输入主题」这一步，详见 utils/create-entry.js。
+ */
+function getAppConfig() {
+  return callFunction('getAppConfig', {});
+}
+
 module.exports = {
   callFunction,
   createTask,
@@ -125,4 +133,5 @@ module.exports = {
   getUserProfile,
   updateUserProfile,
   getDailyQuota,
+  getAppConfig,
 };

@@ -153,8 +153,8 @@ exports.main = async (event = {}) => {
   const data = {
     // 任务描述 → 用户创建时输入的主题，即"对应当前项目名"
     [FIELD_DESC]: { value: clampThing(task.topic, '你的作品') },
-    // phrase 类型限 5 个汉字："已完成"(3) / "生成失败"(4) 均合规
-    [FIELD_STATE]: { value: isDone ? '已完成' : '生成失败' },
+    // phrase 类型限 5 个汉字："已完成"(3) / "创作失败"(4) 均合规
+    [FIELD_STATE]: { value: isDone ? '已完成' : '创作失败' },
   };
 
   try {

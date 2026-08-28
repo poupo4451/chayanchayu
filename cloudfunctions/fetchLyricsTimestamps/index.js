@@ -166,7 +166,7 @@ exports.main = async (event) => {
         return { success: false, code: 'FORBIDDEN', message: '无权操作此任务' };
       }
       if (!task.quotaDateKey) {
-        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起生成' };
+        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起创作' };
       }
     }
 

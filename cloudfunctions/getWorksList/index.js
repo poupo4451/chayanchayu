@@ -55,7 +55,7 @@ exports.main = async (event) => {
       id: item._id,
       type: 'task',
       taskId: item._id,
-      title: item.topic || '生成中的作品',
+      title: item.topic || '创作中的作品',
       videoUrl: '',
       duration: '',
       createdAt: item.createdAt,

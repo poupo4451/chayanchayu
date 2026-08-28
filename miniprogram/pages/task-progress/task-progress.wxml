@@ -55,14 +55,14 @@
     </view>
     <view class="notify-body">
       <text class="notify-title">{{notifyState === 'on' ? '已开启完成通知' : '开启完成通知'}}</text>
-      <text class="notify-desc">{{notifyState === 'on' ? '生成完成后会收到微信服务通知，现在可以放心退出' : (notifyState === 'banned' ? '通知已被关闭，可在右上角「…」→ 设置 → 订阅消息中开启' : '完成后微信提醒你，不用一直守在这个页面')}}</text>
+      <text class="notify-desc">{{notifyState === 'on' ? '创作完成后会收到微信服务通知，现在可以放心退出' : (notifyState === 'banned' ? '通知已被关闭，可在右上角「…」→ 设置 → 订阅消息中开启' : '完成后微信提醒你，不用一直守在这个页面')}}</text>
     </view>
     <text wx:if="{{notifyState !== 'on'}}" class="notify-arrow">›</text>
   </view>
 
   <!-- ==================== 失败说明 ==================== -->
   <view wx:if="{{failed}}" class="alert">
-    <text class="alert-text">{{errorMsg || '这次没能生成成功，换个说法重新创建一次通常就好了'}}</text>
+    <text class="alert-text">{{errorMsg || '这次没能创作成功，换个说法重新创建一次通常就好了'}}</text>
   </view>
 
   <!-- ==================== 底部操作 ==================== -->

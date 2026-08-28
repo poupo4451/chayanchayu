@@ -121,12 +121,12 @@ exports.main = async (event) => {
         return { success: false, code: 'FORBIDDEN', message: '无权操作此任务' };
       }
       if (!task.quotaDateKey) {
-        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起生成' };
+        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起创作' };
       }
     }
 
     if (!task.lyrics) {
-      throw new Error('任务缺少歌词内容，无法生成音乐');
+      throw new Error('任务缺少歌词内容，无法制作音乐');
     }
 
     const providerTaskId = await submitSunoTask({
@@ -157,10 +157,10 @@ exports.main = async (event) => {
       data: {
         status: 'failed',
         errorStage: 'generating_music',
-        errorMsg: e.message || '音乐生成任务提交失败',
+        errorMsg: e.message || '音乐制作任务提交失败',
         updatedAt: Date.now(),
       },
     });
-    return { success: false, message: e.message || '音乐生成任务提交失败' };
+    return { success: false, message: e.message || '音乐制作任务提交失败' };
   }
 };

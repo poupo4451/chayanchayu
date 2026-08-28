@@ -120,7 +120,7 @@
         hover-stay-time="60"
         bindtap="onRegenerate"
       >
-        <text>重新生成</text>
+        <text>重新创作</text>
       </view>
       <view
         class="btn-primary"
@@ -128,7 +128,7 @@
         hover-stay-time="60"
         bindtap="onConfirm"
       >
-        <text>确认生成 MV</text>
+        <text>确认制作 MV</text>
       </view>
     </view>
   </view>

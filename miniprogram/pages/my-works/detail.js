@@ -188,7 +188,7 @@ Page({
   async loadVideo() {
     const videoUrl = this.data.work.videoUrl;
     if (!videoUrl) {
-      this.setData({ loading: false, loadError: '这个作品还没有生成视频' });
+      this.setData({ loading: false, loadError: '这个作品还没有制作视频' });
       return;
     }
 

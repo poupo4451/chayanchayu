@@ -76,7 +76,7 @@ const server = http.createServer(async (req, res) => {
         data: {
           status: 'failed',
           errorStage: 'generating_music',
-          errorMsg: (body && body.msg) || 'Suno音乐生成失败',
+          errorMsg: (body && body.msg) || 'Suno音乐制作失败',
           updatedAt: Date.now(),
         },
       });

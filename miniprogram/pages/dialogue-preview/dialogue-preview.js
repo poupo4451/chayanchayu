@@ -97,7 +97,7 @@ Page({
 
       if (task.status === 'failed') {
         this.setData({ loading: false });
-        wx.showToast({ title: task.errorMsg || '生成失败，请点重新生成', icon: 'none' });
+        wx.showToast({ title: task.errorMsg || '创作失败，请点重新创作', icon: 'none' });
         this.stopPolling();
         return;
       }
@@ -122,7 +122,7 @@ Page({
       this.pollCount += 1;
       if (this.pollCount > 20) {
         this.setData({ loading: false });
-        wx.showToast({ title: '生成超时，请点重新生成', icon: 'none' });
+        wx.showToast({ title: '创作超时，请点重新创作', icon: 'none' });
         this.stopPolling();
         return;
       }
@@ -487,7 +487,7 @@ Page({
 
   async onRegenerate() {
     this.stopPolling();
-    wx.showLoading({ title: '重新生成中…' });
+    wx.showLoading({ title: '重新创作中…' });
     try {
       const task = await regenerateDialogue(this.data.taskId);
       const d = task.dialogue || [];
@@ -495,7 +495,7 @@ Page({
       this.extractParticipants(d);
       this.measureItemHeight();
     } catch (e) {
-      showError(e, '重新生成失败');
+      showError(e, '重新创作失败');
     } finally {
       wx.hideLoading();
     }
@@ -526,7 +526,7 @@ Page({
         wx.hideLoading();
         wx.showModal({
           title: '今日次数已用完',
-          content: e.message || '今日生成次数已用完，明天 0 点恢复',
+          content: e.message || '今日创作次数已用完，明天 0 点恢复',
           showCancel: false,
           confirmText: '知道了',
         });

@@ -8,6 +8,7 @@ import * as tcb from '@cloudbase/node-sdk';
 import { BubbleData } from './remotion/ChatBubble';
 import { LineMapEntry, LyricLine, LyricWord } from './lyricsAlign';
 import { buildRenderInputs, RENDER_FPS } from './buildRenderInputs';
+import { BRAND } from './remotion/animation-config';
 
 // 渲染服务必须与小程序、云函数和 Cloud Run 部署目标使用同一个环境。
 const ENV_ID = 'cloud1-d7ggdqfhgc4ee2796';
@@ -467,7 +468,8 @@ export async function renderTask(taskId: string): Promise<void> {
         userId: task.userId,
         title: task.topic,
         videoUrl: fileId,
-        duration: audioDuration,
+        // 成片比音频长 BRAND.tailS 秒：尾部追加了品牌片尾段
+        duration: inputProps.audioDuration + BRAND.tailS,
         style: task.style,
         createdAt: Date.now(),
       });

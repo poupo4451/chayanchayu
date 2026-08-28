@@ -1,4 +1,10 @@
 const { getDailyQuota } = require('../../utils/api');
+const {
+  DEFAULT_CREATE_SUB,
+  loadConfig,
+  resolveCreateSub,
+  startCreateFlow,
+} = require('../../utils/create-entry');
 
 // 首页案例预览视频（仅用于首页展示，16:9 横版）。
 // 与生成管线的 3:4 输出（CANVAS 720x960）无关，二者互不影响；更换案例只改这两行。
@@ -27,6 +33,8 @@ Page({
     quotaUnlimited: false,
     // 角标文案在 JS 里预计算，避免 WXML 里堆叠多层三元表达式
     quotaText: '',
+    // 创作卡片副标题：审核模式下由 app_config 覆盖（见 utils/create-entry.js）
+    createSub: DEFAULT_CREATE_SUB,
   },
 
   onLoad() {
@@ -50,6 +58,20 @@ Page({
 
     // 每次回到首页都刷新额度：用户可能刚在别处消耗掉一次
     this.loadQuota();
+
+    // 提前拉运行期开关，让 goCreate 能同步决定走哪条路（点击后再等网络会有明显延迟）。
+    // 也因此，控制台改完 auditMode 后用户切走再切回首页即生效，无需重新发版。
+    this.loadAppConfig();
+  },
+
+  /**
+   * 读运行期开关（审核模式）。
+   * 失败已在 create-entry 内部降级为「开关关闭」，这里只负责同步副标题文案。
+   */
+  async loadAppConfig() {
+    const cfg = await loadConfig();
+    const createSub = resolveCreateSub(cfg);
+    if (createSub !== this.data.createSub) this.setData({ createSub });
   },
 
   /**
@@ -111,17 +133,17 @@ Page({
   },
 
   goCreate() {
-    // 额度已用完就地拦住，别让用户白写一段主题、生成完对话才在确认时被拒
+    // 额度已用完就地拦住，别让用户白写一段主题、创作完对话才在确认时被拒
     if (this.data.quotaLoaded && this.data.quotaExhausted) {
       wx.showModal({
         title: '今日次数已用完',
-        content: `每天可以生成 ${this.data.quotaLimit} 支歌词动画，明天 0 点恢复～`,
+        content: `每天可以创作 ${this.data.quotaLimit} 支歌词动画，明天 0 点恢复～`,
         showCancel: false,
         confirmText: '知道了',
       });
       return;
     }
-    wx.navigateTo({ url: '/pages/create/create' });
+    startCreateFlow();
   },
 
   onShareAppMessage() {

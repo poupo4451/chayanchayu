@@ -1,9 +1,13 @@
 import type { BubbleData } from '@remotion-components/ChatBubble';
+import { BRAND } from '@remotion-components/animation-config';
 
 export const FPS = 30;
-/** 预览时长（秒） */
+/** 预览内容段时长（秒） */
 export const DURATION_SEC = 30;
-export const DURATION_FRAMES = FPS * DURATION_SEC;
+/** 内容段帧数：气泡动画区间，供 beats 与气泡时间轴使用 */
+export const CONTENT_FRAMES = FPS * DURATION_SEC;
+/** 总帧数 = 内容段 + 品牌片尾段，与 Root.tsx calculateMetadata 一致 */
+export const DURATION_FRAMES = CONTENT_FRAMES + Math.round(BRAND.tailS * FPS);
 
 /** 秒 → 帧 */
 const f = (sec: number) => Math.round(sec * FPS);
@@ -183,7 +187,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '转账拉扯',
     desc: '嘻哈 · 红包+转账',
     bubbles: preset1Bubbles,
-    beats: generateDenseBeats(preset1Bubbles, FPS, DURATION_FRAMES),
+    beats: generateDenseBeats(preset1Bubbles, FPS, CONTENT_FRAMES),
     genre: '嘻哈',
   },
   {
@@ -191,7 +195,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '深夜暧昧',
     desc: 'R&B · 红包试探',
     bubbles: preset2Bubbles,
-    beats: generateDenseBeats(preset2Bubbles, FPS, DURATION_FRAMES),
+    beats: generateDenseBeats(preset2Bubbles, FPS, CONTENT_FRAMES),
     genre: 'R&B',
   },
   {
@@ -199,7 +203,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '假意关心',
     desc: '伤感 · 欲言又止',
     bubbles: preset3Bubbles,
-    beats: generateDenseBeats(preset3Bubbles, FPS, DURATION_FRAMES),
+    beats: generateDenseBeats(preset3Bubbles, FPS, CONTENT_FRAMES),
     genre: '流行',
   },
   {
@@ -207,7 +211,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '甜蜜拉扯',
     desc: '轻快 · 暧昧互动',
     bubbles: preset4Bubbles,
-    beats: generateDenseBeats(preset4Bubbles, FPS, DURATION_FRAMES),
+    beats: generateDenseBeats(preset4Bubbles, FPS, CONTENT_FRAMES),
     genre: '流行',
   },
   {
@@ -215,7 +219,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '直接要钱',
     desc: '抖音 · 快节奏短句',
     bubbles: preset5Bubbles,
-    beats: generateDenseBeats(preset5Bubbles, FPS, DURATION_FRAMES),
+    beats: generateDenseBeats(preset5Bubbles, FPS, CONTENT_FRAMES),
     genre: '抖音风',
   },
   {
@@ -223,7 +227,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     label: '欲擒故纵',
     desc: '流行 · 进退试探',
     bubbles: preset6Bubbles,
-    beats: generateDenseBeats(preset6Bubbles, FPS, DURATION_FRAMES),
+    beats: generateDenseBeats(preset6Bubbles, FPS, CONTENT_FRAMES),
     genre: '流行',
   },
 ];

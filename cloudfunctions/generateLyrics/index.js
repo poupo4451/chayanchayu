@@ -318,7 +318,7 @@ exports.main = async (event) => {
         return { success: false, code: 'FORBIDDEN', message: '无权操作此任务' };
       }
       if (!task.quotaDateKey) {
-        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起生成' };
+        return { success: false, code: 'QUOTA_REQUIRED', message: '任务状态异常，请重新发起创作' };
       }
     }
 
@@ -327,7 +327,7 @@ exports.main = async (event) => {
     const entries = getSingableEntries(task.dialogue);
 
     if (entries.length === 0) {
-      throw new Error('对话内容为空，无法生成歌词');
+      throw new Error('对话内容为空，无法创作歌词');
     }
 
     let llmLines = [];
@@ -413,10 +413,10 @@ exports.main = async (event) => {
       data: {
         status: 'failed',
         errorStage: 'generating_lyrics',
-        errorMsg: e.message || '歌词生成失败',
+        errorMsg: e.message || '歌词创作失败',
         updatedAt: Date.now(),
       },
     });
-    return { success: false, message: e.message || '歌词生成失败' };
+    return { success: false, message: e.message || '歌词创作失败' };
   }
 };

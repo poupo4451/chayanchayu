@@ -3,6 +3,7 @@ import { Composition } from 'remotion';
 import { ChatMVComposition } from './ChatMVComposition';
 import { BubbleData } from './ChatBubble';
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from './wxTheme';
+import { BRAND } from './animation-config';
 
 export const FPS = 30;
 
@@ -29,7 +30,9 @@ export const Root: React.FC = () => {
       calculateMetadata={
         (async ({ props }: { props: Record<string, unknown> }) => {
           const audioDuration = Number(props.audioDuration) || 30;
-          return { durationInFrames: Math.ceil(audioDuration * FPS) };
+          // 尾部追加品牌片尾段（logo + slogan）；气泡内容只占前面的内容段
+          const brandTailFrames = Math.round(BRAND.tailS * FPS);
+          return { durationInFrames: Math.ceil(audioDuration * FPS) + brandTailFrames };
         }) as never
       }
     />

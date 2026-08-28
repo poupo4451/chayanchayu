@@ -7,6 +7,7 @@ const {
   startNotifyAndFinalize,
 } = require('../../utils/api');
 const { startPolling } = require('../../utils/task-polling');
+const { startCreateFlow } = require('../../utils/create-entry');
 const { MV_DONE_TMPL_ID, requestMvDoneSubscribe } = require('../../utils/notify');
 
 /** hero 区的「人话」文案，与清单里的短名词刻意区分，避免同屏重复 */
@@ -18,7 +19,7 @@ const STAGE_LABELS = {
   generating_music: '正在创作专属背景音乐',
   rendering_video: '正在合成最终的 MV',
   completed: '你的作品已经准备好了',
-  failed: '生成过程中断了',
+  failed: '创作过程中断了',
 };
 
 /** 流程清单：note 只在该步为「进行中」时展示，避免一屏文字堆叠 */
@@ -449,7 +450,12 @@ Page({
     wx.switchTab({ url: '/pages/my-works/my-works' });
   },
 
+  /**
+   * 失败后重新创建。
+   * 用 redirect：当前进度页已无返回价值，不该继续堆栈。
+   * 走输入页还是审核旁路由 create-entry 统一决定。
+   */
   onRecreate() {
-    wx.redirectTo({ url: '/pages/create/create' });
+    startCreateFlow({ redirect: true });
   },
 });

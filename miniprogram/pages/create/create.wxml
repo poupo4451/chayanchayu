@@ -92,7 +92,7 @@
       hover-stay-time="60"
       bindtap="onSubmit"
     >
-      <text>{{submitting ? '创建中…' : '开始生成对话'}}</text>
+      <text>{{submitting ? '创建中…' : '开始创作对话'}}</text>
     </view>
   </view>
 </view>

@@ -855,3 +855,36 @@ export function getDefaultConfig(): AnimationConfig {
     fontFamily: FONT_FAMILY,
   };
 }
+
+// ============================================================
+// 9. 品牌片尾
+// ============================================================
+
+/**
+ * 品牌片尾：一张已包含 logo + slogan 的成品图，居中渐现。
+ *
+ * 【时间线】气泡全部退场之后，再追加 tailS 秒片尾：
+ *   内容段 [0, contentEnd)                       —— 气泡动画，最后一组在此退场消失
+ *   片尾段 [contentEnd, contentEnd + tailS×fps)  —— 前 fadeInS 秒渐现，之后保持到结束
+ *
+ * 视频总时长 = ceil(audioDuration × fps) + round(tailS × fps)。
+ * 片尾段内音频已播完（静音），故音频淡出锚点必须仍是内容段结束帧。
+ *
+ * 素材自带透明通道，在深色画布上直接融合，无需额外背板/圆角处理。
+ */
+export const BRAND = {
+  /** 片尾总时长（秒） */
+  tailS: 2.0,
+  /** 片尾素材渐现时长（秒） */
+  fadeInS: 0.3,
+  /** 片尾素材路径（相对 public/） */
+  endingFile: 'brand/ending.png',
+  /**
+   * 素材导出倍率：设计稿按 2x 导出（实际 824×756），
+   * 渲染时缩放到 1/2（412×378）显示，保证清晰不发虚。
+   */
+  assetScale: 2,
+  /** 素材在 1x 下的显示尺寸（= 824/2 × 756/2） */
+  endingWidth: 412,
+  endingHeight: 378,
+} as const;

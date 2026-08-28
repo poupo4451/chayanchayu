@@ -61,7 +61,7 @@
         <view class="empty-bar empty-bar-4"></view>
       </view>
       <text class="empty-title">还没有作品</text>
-      <text class="empty-text">输入一个主题，自动生成一段对话并唱出来</text>
+      <text class="empty-text">输入一个主题，自动创作一段对话并唱出来</text>
       <view class="empty-btn" hover-class="empty-btn-hover" hover-stay-time="60" bindtap="goCreate">
         <text>创作第一个作品</text>
       </view>

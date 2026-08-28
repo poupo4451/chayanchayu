@@ -23,6 +23,7 @@
  * 下载音频、解析 cloud:// 这些副作用留在 render.ts。
  */
 import { BubbleData } from './remotion/ChatBubble';
+import { BRAND } from './remotion/animation-config';
 import {
   computeBubbleTimings,
   AlignReport,
@@ -200,7 +201,7 @@ function getLastLyricEndSeconds(
 /**
  * 最后一个气泡「入场动画播完」的时间（秒）。
  * 入场时长最长约 22 帧，anticipation 约 15 帧，故动画结束 ≈ startFrame + 0.3s。
- * 最后一组的 group.end 会被推到 totalFrames 之后，退场不会播，这里只算入场。
+ * 这里只算入场：退场时长仅 3~6 帧（0.1~0.2s），相对 TAIL_BUFFER 的 2.3s 可忽略。
  */
 function getLastBubbleAnimEndSeconds(
   fps: number,
@@ -382,8 +383,9 @@ export function buildRenderInputs(params: BuildRenderInputsParams): BuildRenderI
       // 流派用于挑选气泡入场动画池（嘻哈更 punchy，抒情类更柔和）
       genre: task.style?.musicGenre || '',
     },
-    // 与 Root.tsx calculateMetadata 完全一致的推导，避免两边算出不同帧数
-    durationInFrames: Math.ceil(finalDuration * fps),
+    // 与 Root.tsx calculateMetadata 完全一致的推导（含品牌片尾段），
+    // 避免两边算出不同帧数导致「预览调好、上云观感不同」
+    durationInFrames: Math.ceil(finalDuration * fps) + Math.round(BRAND.tailS * fps),
     report,
   };
 }
